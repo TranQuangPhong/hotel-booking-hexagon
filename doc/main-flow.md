@@ -42,6 +42,7 @@ Usecase 1: Create booking order
 
 
 Usecase 2: Cancel booking order
-
+- TODO
 
 Usecase 3: Payment request (client requests payment after done reserving room)
+- TODO

@@ -987,7 +987,7 @@
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
-      "roughness": 1,
+      "roughness": 0,
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
@@ -995,9 +995,9 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1281622646,
-      "version": 665,
-      "versionNonce": 510433418,
+      "seed": 1150973045,
+      "version": 673,
+      "versionNonce": 1070397787,
       "isDeleted": false,
       "boundElements": [
         {
@@ -1073,7 +1073,7 @@
           "type": "arrow"
         }
       ],
-      "updated": 1785523443655,
+      "updated": 1785601370037,
       "link": null,
       "locked": false
     },
@@ -1992,7 +1992,7 @@
       "version": 18,
       "versionNonce": 75202954,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "updated": 1785523503766,
       "link": null,
       "locked": false,
@@ -3050,7 +3050,7 @@
       "version": 280,
       "versionNonce": 854300810,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "updated": 1785522050514,
       "link": null,
       "locked": false,
