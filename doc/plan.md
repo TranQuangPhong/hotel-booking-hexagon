@@ -34,6 +34,7 @@
 Next step:
 - Impl: Design models -> folder structure -> Impl APIs
     + User service
+    + Model + APIs
 - Local deployment & test (skip AWS API gateway, Cognito, Lambda)
 - AWS deployment (Add Gateway, Cognito, Lambda)
 - CICD
