@@ -29,18 +29,18 @@ func (s *UserService) GetUserByID(ctx context.Context, id string) (*User, error)
 	return user, nil
 }
 
-func (s *UserService) CreateUser(ctx context.Context, user *User) error {
-	err := s.userRepository.CreateUser(ctx, user)
+func (s *UserService) CreateUser(ctx context.Context, user *User) (*User, error) {
+	newUser, err := s.userRepository.CreateUser(ctx, user)
 	if err != nil {
-		return fmt.Errorf("failed to create user: %w", err)
+		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
-	return nil
+	return newUser, nil
 }
 
-func (s *UserService) UpdateUser(ctx context.Context, user *User) error {
-	err := s.userRepository.UpdateUser(ctx, user)
+func (s *UserService) UpdateUser(ctx context.Context, user *User) (*User, error) {
+	newUser, err := s.userRepository.UpdateUser(ctx, user)
 	if err != nil {
-		return fmt.Errorf("failed to update user: %w", err)
+		return nil, fmt.Errorf("failed to update user: %w", err)
 	}
-	return nil
+	return newUser, nil
 }

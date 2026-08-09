@@ -39,12 +39,12 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 	user := req.ToUser()
-	err := h.service.CreateUser(c.Request.Context(), user)
+	newUser, err := h.service.CreateUser(c.Request.Context(), user)
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("failed to create user: %w", err).Error()})
 		return
 	}
-	c.JSON(201, user)
+	c.JSON(201, newUser)
 }
 
 func (h *UserHandler) UpdateUser(c *gin.Context) {
@@ -54,10 +54,10 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 	user := req.ToUser()
-	err := h.service.UpdateUser(c.Request.Context(), user)
+	newUser, err := h.service.UpdateUser(c.Request.Context(), user)
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("failed to update user: %w", err).Error()})
 		return
 	}
-	c.JSON(200, user)
+	c.JSON(200, newUser)
 }

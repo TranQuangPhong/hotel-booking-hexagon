@@ -10,8 +10,8 @@ user-service/
 │   │   ├── identity.go         # Port: IdentityService (Cognito adapter will impl this)
 │   │   └── repository.go       # Port: (DB interface here)
 │   │
-│   └── adapter/                # Outside world (ỨSpecific technology application)
-│       ├── httphandler/
+│   └── adapter/                # Outside world (Specific technology application)
+│       ├── handler/
 │       │   ├── handler.go           # Receive HTTP requests
 │       │   └── router.go            # Endpoints (Gin)
 │       ├── postgres/
@@ -47,7 +47,7 @@ room-service/
 │   │   └── room_released.go    # Event contracts
 │   │
 │   └── adapter/                          ===== Adapters =====
-│       ├── httphandler/
+│       ├── handler/
 │       │   ├── room_handler.go     # HTTP -> RoomService
 │       │   └── router.go           # Gin
 │       ├── kafka/
