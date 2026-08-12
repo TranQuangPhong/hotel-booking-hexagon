@@ -3,13 +3,15 @@ package handler
 import (
 	"net/http"
 
+	logger "github.com/TranQuangPhong/hotel-booking-logger"
+
 	"github.com/gin-gonic/gin"
 )
 
 func (h *UserHandler) UserRouter() *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
-	// r.User(LoggingMiddleware()) //TODO
+	r.Use(logger.LoggingMiddleware())
 
 	r.GET("/users/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
