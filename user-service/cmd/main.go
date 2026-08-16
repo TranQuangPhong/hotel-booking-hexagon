@@ -1,10 +1,12 @@
 package main
 
 import (
+	"booking/user-service/config"
 	"booking/user-service/internal/adapter/handler"
 	"booking/user-service/internal/adapter/postgres"
 	"booking/user-service/internal/user"
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -25,9 +27,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Init repository, service, handler, router, and server
-	// TODO: use config
-	pool, err := pgxpool.New(ctx, "postgres://userservice:userservice@localhost:5440/users")
+	// Load env config
+	cfg, err := config.Load()
+
+	// Init postgresql
+	connString := fmt.Sprintf( // Eg: "postgres://userservice:userservice@localhost:5440/users"
+		"postgres://%s:%s@%s:%d/%s",
+		cfg.DB.User,
+		cfg.DB.Password,
+		cfg.DB.Host,
+		cfg.DB.Port,
+		cfg.DB.Name,
+	)
+	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		slog.Error("failed to init postgresql", "error", err.Error())
 		os.Exit(1)
@@ -46,12 +58,13 @@ func main() {
 	router := userHandler.UserRouter()
 
 	// Start http server
+	httpServerPort := fmt.Sprintf(":%d", cfg.Server.Port) //Eg ":8181"
 	server := &http.Server{
-		Addr:    ":8181",
+		Addr:    httpServerPort,
 		Handler: router,
 	}
 	go func() {
-		slog.Info("Server is starting...", "addr", ":8181")
+		slog.Info("Server is starting...", "addr", httpServerPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("failed to start http server", "error", err.Error())
 			os.Exit(1)
