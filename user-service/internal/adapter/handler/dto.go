@@ -22,8 +22,9 @@ type UpdateUserRequest struct {
 	Role  string `json:"role" binding:"required"`
 }
 
-func (req *UpdateUserRequest) ToUser() *user.User {
+func (req *UpdateUserRequest) ToUser(id string) *user.User {
 	return &user.User{
+		ID: id,
 		Name:  req.Name,
 		Email: req.Email,
 		Role:  user.Role(req.Role),

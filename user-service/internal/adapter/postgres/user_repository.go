@@ -16,7 +16,7 @@ func NewUserRepository(ctx context.Context, pool *pgxpool.Pool) *UserRepository 
 }
 
 func (r *UserRepository) GetUsers(ctx context.Context) ([]*user.User, error) {
-	sql := `select id, name, email, rolo from users`
+	sql := `select id, name, email, role from users`
 	rows, err := r.pool.Query(ctx, sql)
 	if err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ func (r *UserRepository) GetUsers(ctx context.Context) ([]*user.User, error) {
 }
 
 func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*user.User, error) {
-	sql := `select id, name, email, rolo from users where id = $1`
+	sql := `select id, name, email, role from users where id = $1`
 	var u user.User
 	if err := r.pool.QueryRow(ctx, sql, id).Scan(&u.ID, &u.Name, &u.Email, &u.Role); err != nil {
 		return nil, err
