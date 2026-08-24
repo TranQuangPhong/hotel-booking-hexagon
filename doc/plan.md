@@ -32,10 +32,12 @@
 6. FE for all services (gen AI)
 
 Next step:
-- Impl: Design models -> folder structure -> Impl APIs
-    + User service (done)
+- (done) Impl user-service: Design models -> folder structure -> Impl APIs
     + Model + APIs (done)
     + SQL + Logging (done)
+- Impl room-service: Design models -> folder structure -> Impl APIs
+    + Model + APIs
+    + SQL
 - Local deployment & test (skip AWS API gateway, Cognito, Lambda)
 - AWS deployment (Add Gateway, Cognito, Lambda)
 - CICD

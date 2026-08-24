@@ -12,7 +12,7 @@ Hotel booking system
     + View list of rooms
     + View room details
     + Create/update/delete room
-- Inventory (month, day(slots))
+- Inventory (year, month, day)
     + Reserve room
 
 4. Booking service

@@ -56,10 +56,10 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	id := c.Param("id")
 	user := req.ToUser(id)
 
-	newUser, err := h.service.UpdateUser(c.Request.Context(), user)
+	updatedUser, err := h.service.UpdateUser(c.Request.Context(), user)
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
 		return
 	}
-	c.JSON(200, newUser)
+	c.JSON(200, updatedUser)
 }
