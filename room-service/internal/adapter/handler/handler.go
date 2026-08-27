@@ -9,11 +9,11 @@ import (
 )
 
 type RoomHandler struct {
-	roomSerivce      *room.Service
+	roomSerivce      *room.RoomService
 	inventoryService *inventory.Service
 }
 
-func NewRoomHandler(rs *room.Service, is *inventory.Service) *RoomHandler {
+func NewRoomHandler(rs *room.RoomService, is *inventory.Service) *RoomHandler {
 	return &RoomHandler{roomSerivce: rs, inventoryService: is}
 }
 

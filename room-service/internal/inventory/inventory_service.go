@@ -1,3 +1,7 @@
 package inventory
 
-type Service struct{}
+type InventoryService struct{}
+
+func NewInventoryService() *InventoryService {
+	return &InventoryService{}
+}

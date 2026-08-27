@@ -65,3 +65,22 @@ room-service/
 │           └── client.go
 ├── go.mod
 └── README.md
+
+
+orchestrator-service/
+├── cmd/
+│   └── main.go
+├── config/
+│    └── config.go
+├── internal/
+│   ├── saga/
+│   │   ├── orchestrator.go
+│   │   └── state.go
+│   ├── event/
+│   │   └── events.go
+│   └── adapter/
+│       └── kafka/
+│           ├── consumer.go
+│           └── producer.go
+├── go.mod
+└── README.md

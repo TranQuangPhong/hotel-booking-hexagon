@@ -3,12 +3,12 @@ package room
 import "time"
 
 type Room struct {
-	ID        string     `db:"id"`
-	Number    string     `db:"number"`
-	Type      RoomType   `db:"type"`
-	Status    RoomStatus `db:"status"`
-	CreatedAt time.Time  `db:"created_at"`
-	UpdatedAt time.Time  `db:"updated_at"`
+	ID        string     `json:"id" db:"id"`
+	Number    string     `json:"number" db:"number"`
+	Type      RoomType   `json:"type" db:"type"`
+	Status    RoomStatus `json:"status" db:"status"`
+	CreatedAt time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 type RoomStatus string

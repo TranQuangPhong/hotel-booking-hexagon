@@ -3,13 +3,13 @@ package inventory
 import "time"
 
 type Inventory struct {
-	ID        int64                 `db:"id"`
-	RoomID    string                `db:"room_id"`          // UUID from Room model
-	Year      int16                 `db:"year"`             // YYYY
-	Month     int16                 `db:"month"`            // 1 - 12
-	Days      map[int8]InventoryDay `json:"days" db:"days"` // Stored as json for each day
-	CreatedAt time.Time             `db:"created_at"`
-	UpdatedAt time.Time             `db:"updated_at"`
+	ID        int64                 `json:"id" db:"id"`
+	RoomID    string                `json:"room_id" db:"room_id"` // UUID from Room model
+	Year      int16                 `json:"year" db:"year"`       // YYYY
+	Month     int16                 `json:"month" db:"month"`     // 1 - 12
+	Days      map[int8]InventoryDay `json:"days" db:"days"`       // Stored as json for each day
+	CreatedAt time.Time             `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time             `json:"updated_at" db:"updated_at"`
 }
 
 type InventoryDay struct {

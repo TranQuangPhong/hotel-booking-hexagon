@@ -36,8 +36,13 @@ Next step:
     + Model + APIs (done)
     + SQL + Logging (done)
 - Impl room-service: Design models -> folder structure -> Impl APIs
-    + Model + APIs
-    + SQL
+    + Model + APIs (done)
+    + SQL (done)
+    + Skip inventory SQL (impl in specific create-booking usecase)
+    + Test APIs
+- Impl booking-service: Models -> folder structure -> APIs
+- Impl Usecase 1: Create booking order -> full flow: orchestrator -> booking -> room -> payment -> notify
+
 - Local deployment & test (skip AWS API gateway, Cognito, Lambda)
 - AWS deployment (Add Gateway, Cognito, Lambda)
 - CICD
