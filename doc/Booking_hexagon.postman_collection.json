@@ -1,0 +1,277 @@
+{
+  "info": {
+    "_postman_id": "88b1f7d8-67d1-4b2f-9b70-86e21f05b48a",
+    "name": "Booking hexagon",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "16233051",
+    "_collection_link": "https://go.postman.co/collection/16233051-88b1f7d8-67d1-4b2f-9b70-86e21f05b48a?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "user_service",
+      "item": [
+        {
+          "name": "user health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{user_url}}/health",
+              "host": [
+                "{{user_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "user get all",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{user_url}}/api/v1/",
+              "host": [
+                "{{user_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                ""
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "user get by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{user_url}}/api/v1/550e8400-e29b-41d4-a716-446655440000",
+              "host": [
+                "{{user_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "550e8400-e29b-41d4-a716-446655440000"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "user create",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"name\": \"phong\",\r\n    \"email\": \"phong@gmail.com\",\r\n    \"role\": \"USER\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{user_url}}/api/v1/",
+              "host": [
+                "{{user_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                ""
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "user update",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"name\": \"phong1\",\r\n    \"email\": \"phong1@gmail.com\",\r\n    \"role\": \"USER\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{user_url}}/api/v1/356e528f-ace8-42bb-870a-9ef89a5aba76",
+              "host": [
+                "{{user_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "356e528f-ace8-42bb-870a-9ef89a5aba76"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "room_service",
+      "item": [
+        {
+          "name": "room health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{room_url}}/health",
+              "host": [
+                "{{room_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "room get all",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{room_url}}/api/v1/",
+              "host": [
+                "{{room_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                ""
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "room get by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{room_url}}/api/v1/1f681ffc-36fb-43cb-a349-6bccff9f9aaa",
+              "host": [
+                "{{room_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "1f681ffc-36fb-43cb-a349-6bccff9f9aaa"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "room create",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"number\": \"103\",\r\n    \"type\": \"SUITE\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{room_url}}/api/v1/",
+              "host": [
+                "{{room_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                ""
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "room update",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"number\": \"101\",\r\n    \"type\": \"STANDARD\",\r\n    \"status\": \"ACTIVE\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{room_url}}/api/v1/1f681ffc-36fb-43cb-a349-6bccff9f9aaa",
+              "host": [
+                "{{room_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "1f681ffc-36fb-43cb-a349-6bccff9f9aaa"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "user_url",
+      "value": ""
+    },
+    {
+      "key": "room_url",
+      "value": ""
+    }
+  ]
+}

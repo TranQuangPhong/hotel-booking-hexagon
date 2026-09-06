@@ -32,16 +32,17 @@
 6. FE for all services (gen AI)
 
 Next step:
-- (done) Impl user-service: Design models -> folder structure -> Impl APIs
+- Impl user-service: Design models -> folder structure -> Impl APIs (done)
     + Model + APIs (done)
     + SQL + Logging (done)
-- Impl room-service: Design models -> folder structure -> Impl APIs
+- Impl room-service: Design models -> folder structure -> Impl APIs (done)
     + Model + APIs (done)
     + SQL (done)
-    + Skip inventory SQL (impl in specific create-booking usecase)
-    + Test APIs
-- Impl booking-service: Models -> folder structure -> APIs
-- Impl Usecase 1: Create booking order -> full flow: orchestrator -> booking -> room -> payment -> notify
+    + Temporarily Skip inventory SQL (impl in specific create-booking usecase)
+    + Test APIs (done)
+
+- Impl booking-service: Models -> folder structure -> APIs [NEXT]
+- Impl Usecase 1: Create booking order -> full flow: orchestrator -> booking -> room -> payment -> notify [NEXT]
 
 - Local deployment & test (skip AWS API gateway, Cognito, Lambda)
 - AWS deployment (Add Gateway, Cognito, Lambda)

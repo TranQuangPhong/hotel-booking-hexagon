@@ -1,55 +1,20 @@
 services:
-  postgres-user:
+  postgres-booking:
     image: postgres:latest
-    container_name: postgres-user
+    container_name: postgres-booking
     environment:
-      POSTGRES_USER: user_service
-      POSTGRES_PASSWORD: user_service
-      POSTGRES_DB: user_service
+      POSTGRES_USER: booking
+      POSTGRES_PASSWORD: booking
+      POSTGRES_DB: booking_service
     ports:
       - "5440:5432"
     volumes:
-      - postgres_booking_data_users:/var/lib/postgresql
+      - postgres_booking_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user_service -d user_service"]
+      test: ["CMD-SHELL", "pg_isready -U booking -d booking"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  postgres-room:
-    image: postgres:latest
-    container_name: postgres-room
-    environment:
-      POSTGRES_USER: room_service
-      POSTGRES_PASSWORD: room_service
-      POSTGRES_DB: room_service
-    ports:
-      - "5441:5432"
-    volumes:
-      - postgres_booking_data_rooms:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U room_service -d room_service"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # postgres-payment:
-  #   image: postgres:latest
-  #   container_name: postgres-payment
-  #   environment:
-  #     POSTGRES_USER: payment_service
-  #     POSTGRES_PASSWORD: payment_service
-  #     POSTGRES_DB: payment
-  #   ports:
-  #     - "5441:5432"
-  #   volumes:
-  #     - postgres_booking_data_payment:/var/lib/postgresql
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U payment_service -d payment"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
 
 volumes:
-  postgres_booking_data_users:
-  # postgres_booking_data_payment:
+  postgres_booking_data:

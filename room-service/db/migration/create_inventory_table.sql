@@ -1,6 +1,6 @@
 CREATE TABLE inventory (
     id BIGSERIAL PRIMARY KEY,
-    room_id UUID NOT NULL REFERENCES room(id),
+    room_id UUID NOT NULL REFERENCES rooms(id),
     "year" SMALLINT NOT NULL,
     "month" SMALLINT NOT NULL,
     "days" JSONB NOT NULL,
