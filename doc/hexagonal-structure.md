@@ -1,3 +1,22 @@
+orchestrator-service/
+├── cmd/
+│   └── main.go
+├── config/
+│    └── config.go
+├── internal/
+│   ├── saga/
+│   │   ├── orchestrator.go
+│   │   └── state.go
+│   ├── event/
+│   │   └── events.go
+│   └── adapter/
+│       └── kafka/
+│           ├── consumer.go
+│           └── producer.go
+├── go.mod
+└── README.md
+
+
 user-service/
 ├── cmd/
 │   └── main.go                 # initialize (Manual DI Container)
@@ -67,20 +86,44 @@ room-service/
 └── README.md
 
 
-orchestrator-service/
+booking-service/
 ├── cmd/
 │   └── main.go
+│       # Entry point
+│       # Load config
+│       # Create infrastructure clients
+│       # Wire adapters into services
+│       # Start HTTP/Kafka consumers
 ├── config/
-│    └── config.go
+│   └── config.go # Configuration loader
 ├── internal/
-│   ├── saga/
-│   │   ├── orchestrator.go
-│   │   └── state.go
+│   ├── booking/                             ===== Business =====
+│   │   ├── booking.go             # Domain models
+│   │   ├── service.go          # Business logic,  seperate by usecase if needed
+│   │   ├── repository.go       # Port: DB
+│   │   └── publisher.go        # Port: EventPublisher
+│   │
 │   ├── event/
-│   │   └── events.go
-│   └── adapter/
-│       └── kafka/
-│           ├── consumer.go
-│           └── producer.go
+│   │   ├── booking_created.go
+│   │   ├── room_reserved.go
+│   │   └── room_released.go    # Event contracts
+│   │
+│   └── adapter/                          ===== Adapters =====
+│       ├── handler/
+│       │   ├── handler.go     # HTTP -> BookingService
+│       │   └── router.go           # Gin
+│       ├── kafka/
+│       │   ├── client.go           # Kafka producer/consumer client
+│       │   ├── consumer.go         # Kafka -> BookingService
+│       │   └── producer.go         # implements booking.EventPublisher
+│       ├── postgres/
+│       │   ├── client.go           # pgx/sql.DB pool
+│       │   ├── booking_repository.go  # implements booking.Repository
+│       │   └── cached_booking_repository.go
+│       │       # Decorator
+│       │       # Implements booking.Repository
+│       │       # Cache -> Postgres fallback
+│       └── redis/
+│           └── client.go
 ├── go.mod
 └── README.md

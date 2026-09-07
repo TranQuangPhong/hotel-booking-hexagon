@@ -42,6 +42,9 @@ Next step:
     + Test APIs (done)
 
 - Impl booking-service: Models -> folder structure -> APIs [NEXT]
+- Impl orchestrator-service: folder structure
+- Update design, change topics organization (booking.cmd, room.event, payment.event... & use "type", "reason" to handle logic)
+- Impl event (msg structure) module
 - Impl Usecase 1: Create booking order -> full flow: orchestrator -> booking -> room -> payment -> notify [NEXT]
 
 - Local deployment & test (skip AWS API gateway, Cognito, Lambda)
