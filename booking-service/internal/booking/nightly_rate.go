@@ -7,5 +7,4 @@ type NightlyRate struct {
 	BookingID string    `db:"booking_id" json:"booking_id"`
 	Date      time.Time `db:"date" json:"date"`
 	Price     int64     `db:"price" json:"price"`
-	Currency  string    `db:"currency" json:"currency"`
 }

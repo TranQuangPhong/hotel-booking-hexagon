@@ -14,16 +14,16 @@ func NewBookingService(repo BookingRespository) *BookingService {
 	return &BookingService{bookingRepository: repo}
 }
 
-func (s *BookingService) GetBookingByID(ctx context.Context, id string) (*Booking, error) {
-	booking, err := s.bookingRepository.GetBookingByID(ctx, id)
+func (s *BookingService) GetBookingDetailByID(ctx context.Context, id string) (*BookingDetail, error) {
+	booking, err := s.bookingRepository.GetBookingDetailByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get booking by ID: %w", err)
 	}
 	return booking, nil
 }
 
-func (s *BookingService) GetBookingByUserID(ctx context.Context, userID string) ([]*Booking, error) {
-	booking, err := s.bookingRepository.GetBookingByUserID(ctx, userID)
+func (s *BookingService) GetBookingDetailByUserID(ctx context.Context, userID string) ([]*BookingDetail, error) {
+	booking, err := s.bookingRepository.GetBookingDetailByUserID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get booking by user ID: %w", err)
 	}

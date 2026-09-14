@@ -38,7 +38,6 @@ CREATE TABLE booking_nightly_rates (
     booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
     date       DATE NOT NULL,
     price      BIGINT NOT NULL,   -- minor units, same currency as bookings.currency
-    currency   CHAR(3) NOT NULL,
 
     UNIQUE (booking_id, date)
 );
