@@ -21,6 +21,7 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 	rooms, err := h.roomSerivce.GetRooms(c.Request.Context())
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
+		return
 	}
 	c.JSON(200, rooms)
 }
@@ -30,6 +31,7 @@ func (h *RoomHandler) GetRoomByID(c *gin.Context) {
 	room, err := h.roomSerivce.GetRoomByID(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(404, gin.H{"error": fmt.Errorf("%w", err).Error()})
+		return
 	}
 	c.JSON(200, room)
 }

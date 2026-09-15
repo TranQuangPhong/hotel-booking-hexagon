@@ -19,6 +19,7 @@ func (h *UserHandler) GetUsers(c *gin.Context) {
 	users, err := h.service.GetUsers(c.Request.Context())
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
+		return
 	}
 	c.JSON(200, users)
 }
@@ -28,6 +29,7 @@ func (h *UserHandler) GetUserByID(c *gin.Context) {
 	user, err := h.service.GetUserByID(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(404, gin.H{"error": fmt.Errorf("%w", err).Error()})
+		return
 	}
 	c.JSON(200, user)
 }
