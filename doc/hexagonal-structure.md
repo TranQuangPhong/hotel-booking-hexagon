@@ -7,8 +7,7 @@ orchestrator-service/
 │   ├── saga/
 │   │   ├── orchestrator.go
 │   │   └── state.go
-│   ├── event/
-│   │   └── events.go
+│   │
 │   └── adapter/
 │       └── kafka/
 │           ├── consumer.go
