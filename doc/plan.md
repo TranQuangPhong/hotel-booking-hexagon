@@ -41,10 +41,9 @@ Next step:
     + Temporarily Skip inventory SQL (impl in specific create-booking usecase)
     + Test APIs (done)
 
-- Impl orchestrator-service: folder structure
-- Update design, change topics organization (booking.cmd, room.event, payment.event... & use "type", "reason" to handle logic)
-- Impl event (msg structure) module
 - Impl Usecase 1: Create booking order -> full flow: orchestrator -> booking -> room -> payment -> notify [NEXT]
+    + Impl event (msg structure) module
+    + Impl orchestrator
 
 - Local deployment & test (skip AWS API gateway, Cognito, Lambda)
 - AWS deployment (Add Gateway, Cognito, Lambda)

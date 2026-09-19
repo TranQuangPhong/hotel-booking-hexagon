@@ -19,7 +19,9 @@ func (h *BookingHandler) BookingRouter() *gin.Engine {
 	{
 		v1.GET("/", h.GetBookings)
 		v1.GET("/:id", h.GetBookingByID)
-		// v1.DELETE("/:id", h.CancelBooking)
+		// v1.POST("/:id", h.CreateBooking)
+		// v1.POST("/:id/modify", h.ModifyBooking)
+		// v1.POST("/:id/cancel", h.CancelBooking)
 	}
 
 	return r
