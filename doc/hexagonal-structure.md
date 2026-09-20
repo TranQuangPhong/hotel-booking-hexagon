@@ -9,9 +9,14 @@ orchestrator-service/
 │   │   └── state.go
 │   │
 │   └── adapter/
-│       └── kafka/
-│           ├── consumer.go
-│           └── producer.go
+│       ├── handler/
+│       │   ├── dto.go
+│       │   ├── router.go
+│       │   └── handler.go
+│       ├── kafka/
+│       │   ├── consumer.go
+│       │   └── producer.go
+│       └── postgres
 ├── go.mod
 └── README.md
 
