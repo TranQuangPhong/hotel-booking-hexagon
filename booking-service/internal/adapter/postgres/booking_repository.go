@@ -69,7 +69,7 @@ func (r *BookingRepository) GetBookingDetailByUserID(ctx context.Context, userID
 	SELECT id,
 	 	user_id, user_name, user_email, user_phone_number,
 	 	room_id, room_number, room_type,
-	 	heck_in_date, check_out_date,
+	 	check_in_date, check_out_date,
 	 	number_of_guests, total_amount, currency,
 	 	status, payment_status,
 	 	created_at, updated_at
@@ -165,7 +165,7 @@ func (r *BookingRepository) CreateBooking(ctx context.Context, booking *booking.
 	// Insert nightly_rates table
 	if len(booking.NightlyRates) > 0 {
 		batch := &pgx.Batch{}
-		const sqlNightlyRates = `INSERT INTO booking_nightly_rates (booking_id, date, price) VALUES ($1, $2, $3)`
+		const sqlNightlyRates = `INSERT INTO nightly_rates (booking_id, date, price) VALUES ($1, $2, $3)`
 		for i := range booking.NightlyRates {
 			batch.Queue(sqlNightlyRates, booking.ID, booking.NightlyRates[i].Date, booking.NightlyRates[i].Price)
 		}
@@ -189,7 +189,7 @@ func (r *BookingRepository) CreateBooking(ctx context.Context, booking *booking.
 }
 
 func (r *BookingRepository) UpdateBookingStatus(ctx context.Context, id string, status booking.BookingStatus) error {
-	const sql = `UPDATE bookings SET status = $1, updated_at = NOW() WHERE id = $2`
+	const sql = `UPDATE bookings SET status = $2, updated_at = NOW() WHERE id = $1`
 
 	if _, err := r.pool.Exec(ctx, sql, id, status); err != nil {
 		return fmt.Errorf("update status: %w", err)

@@ -29,5 +29,5 @@ Usecase 1: Complete booking order (sync)
 Usecase 2: Cancel booking order
 - TODO
 
-Usecase 3: Payment request (client requests payment after done reserving room)
+Usecase 3: Payment refund
 - TODO

@@ -29,6 +29,10 @@ func main() {
 
 	// Load env config
 	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("failed to load config", "error", err.Error())
+		os.Exit(1)
+	}
 
 	// Init postgresql
 	connString := fmt.Sprintf( // Eg: "postgres://userservice:userservice@localhost:5440/users"

@@ -33,7 +33,7 @@ CREATE INDEX idx_bookings_user_id ON bookings(user_id);
 CREATE INDEX idx_bookings_room_id ON bookings(room_id);
 CREATE INDEX idx_bookings_dates   ON bookings(check_in_date, check_out_date);
 
-CREATE TABLE booking_nightly_rates (
+CREATE TABLE nightly_rates (
     id         BIGSERIAL PRIMARY KEY,
     booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
     date       DATE NOT NULL,
@@ -42,4 +42,4 @@ CREATE TABLE booking_nightly_rates (
     UNIQUE (booking_id, date)
 );
 
-CREATE INDEX idx_nightly_rates_booking_id ON booking_nightly_rates(booking_id);
+CREATE INDEX idx_nightly_rates_booking_id ON nightly_rates(booking_id);
