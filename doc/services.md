@@ -31,6 +31,8 @@ Hotel booking system
     + POST /bookings/{id}/refund    - refund        - downstream of orchestrator
     + POST /bookings/{id}/invoice   - invoice       - downstream of orchestrator
 - Integrate 3rd party payment provider
+    + Call PSP to create/confirm/cancel/capture payment intent
+    + Receive webhook from payment intent -> publish msg to orches
 
 6. Notification service
 - Send notification email

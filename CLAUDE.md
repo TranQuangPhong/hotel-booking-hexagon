@@ -27,9 +27,10 @@ A simple hotel booking system, built as Go microservices with **hexagonal archit
 Key docs:
 - `doc/services.md`: service responsibilities, endpoints, tech stack
 - `doc/use-cases.md`: UC1 create booking, which includes the payment request. UC2 is cancel booking, UC3 is payment refund.
-- `doc/architecture_uc_create_order.excalidraw`: current UC1 design. `architecture_saga_deprecated.excalidraw` is outdated, so don't use it.
+- `doc/uc1-create-booking/`: **detailed UC1 design, the source of truth** (flows, saga/entity state machines, REST/gRPC/Kafka contracts, schema deltas, parked edge cases)
+- `doc/architecture_uc_create_order.excalidraw`: one-page UC1 picture (keep in sync with `uc1-create-booking/`). `architecture_saga_deprecated.excalidraw` is outdated, so don't use it.
 - `doc/hexagonal-structure.md`: target folder layout per service
-- `doc/Message-definition.json`: draft Kafka message envelope (traceId, eventType, producer, data, saga)
+- `doc/Message-definition.json`: example Kafka message envelope (messageId, kind, type, schemaVersion, sagaId, correlationId, causationId, data); fields explained in `uc1-create-booking/contracts.md`
 - `doc/plan.md`: roadmap and current next step
 - `doc/Booking_hexagon.postman_collection.json`: manual API tests
 

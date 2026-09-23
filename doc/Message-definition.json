@@ -1,26 +1,17 @@
 {
-  "traceId": "uuid-1234-5678",        // ID duy nhất để trace toàn bộ flow (correlation ID)
-  "eventType": "booking_request",     // Loại sự kiện (room_query, booking_request, payment_success, payment_failed...)
-  "producer": "booking-service",      // Tên service phát sinh event, có thể dùng để định tuyến hoặc phân tích log
-  "timestamp": "2026-02-12T16:35:00Z",// Thời điểm phát sinh event
-  "user": { //Ignore temporary, có thể dùng để xác thực hoặc phân quyền
-    "userId": "abc123",
-    "roles": ["USER"],
-    "email": "user@example.com"       // Có thể dùng cho Notification Service
-  },
+  "messageId": "0f8b6f2e-3c1a-4c55-9a7e-6d2b1f0c9a11",
+  "kind": "event",
+  "type": "PaymentAuthorized",
+  "schemaVersion": 1,
+  "producer": "payment-service",
+  "sagaId": "5b2e0c4d-8f3a-4e1b-b6c7-2a9d0e1f3c44",
+  "correlationId": "5b2e0c4d-8f3a-4e1b-b6c7-2a9d0e1f3c44",
+  "causationId": null,
+  "occurredAt": "2026-03-01T10:15:00Z",
   "data": {
-    // Nội dung chính của request
-    "eventId": "evt567",
-    "roomId": 2,
-    "checkInDatetime": "2026-03-01T14:00:00Z",
-    "checkOutDatetime": "2026-03-05T12:00:00Z",
-    "numberOfGuests": 2,
-    "price": 100,
+    "paymentId": "a1c3e5f7-2b4d-4f6a-8c0e-1d3f5a7b9c22",
+    "bookingId": "c7e9a1b3-5d7f-4a2c-9e4b-6f8a0c2e4d66",
+    "amount": 48000,
     "currency": "USD"
-  },
-  "saga": { //Ignore temporary
-    "step": "BOOKING",                // Bước hiện tại trong Saga (BOOKING, PAYMENT)
-    "status": "PENDING",              // Trạng thái (PENDING, PROCESSING, SUCCESS, FAILED)
-    "compensation": "CANCEL_BOOKING"  // Hành động rollback nếu thất bại
   }
 }

@@ -44,6 +44,8 @@ Next step:
 - Impl Usecase 1: Create booking order -> full flow: orchestrator -> booking -> room -> payment -> notify [NEXT]
     + Impl event (msg structure) module
     + Impl orchestrator
+    + Detailed design: doc/uc1-create-booking/ (README -> flows -> state-machines -> contracts -> data-model -> edge-cases)
+      -> supersedes "Suggested revised flow" below (change: declined card no longer ends the saga, only authorization or deadline does)
 
     UC1 design decisions (from architecture review)
     1. PSP webhook -> Payment svc (NOT orchestrator)
