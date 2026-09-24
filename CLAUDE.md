@@ -27,40 +27,46 @@ A simple hotel booking system, built as Go microservices with **hexagonal archit
 Key docs:
 - `doc/services.md`: service responsibilities, endpoints, tech stack
 - `doc/use-cases.md`: UC1 create booking, which includes the payment request. UC2 is cancel booking, UC3 is payment refund.
-- `doc/uc1-create-booking/`: **detailed UC1 design, the source of truth** (flows, saga/entity state machines, REST/gRPC/Kafka contracts, schema deltas, parked edge cases)
+- `doc/uc1-create-booking/`: **detailed UC1 design, the source of truth** (lean v1: flows, saga/entity state machines, REST/gRPC/Kafka contracts, schema deltas, build order M1–M6; cut items live in `good-to-have.md`, so don't pull them into v1 work)
 - `doc/architecture_uc_create_order.excalidraw`: one-page UC1 picture (keep in sync with `uc1-create-booking/`). `architecture_saga_deprecated.excalidraw` is outdated, so don't use it.
 - `doc/hexagonal-structure.md`: target folder layout per service
-- `doc/Message-definition.json`: example Kafka message envelope (messageId, kind, type, schemaVersion, sagaId, correlationId, causationId, data); fields explained in `uc1-create-booking/contracts.md`
+- `doc/Message-definition.json`: example Kafka message envelope, v1 (messageId, type, sagaId, producer, occurredAt, data); fields explained in `uc1-create-booking/contracts.md`
 - `doc/plan.md`: roadmap and current next step
 - `doc/Booking_hexagon.postman_collection.json`: manual API tests
 
 ## Architecture
 
-**Communication (UC1, create booking):**
+**Communication (UC1, create booking; details in `doc/uc1-create-booking/`):**
 - Client → (API Gateway later) → **Orchestrator** over REST
-- Orchestrator → Room svc (`reserve_room`) and Booking svc (`create order`) over **gRPC**, synchronously
-- Orchestrator → Payment svc (`start txn` → PSP payment intent), synchronously
-- PSP webhook → payment result → orchestrator **fans out over Kafka**: update inventory, update booking status, payment log, notify
-- Compensation, like releasing a room or cancelling a booking, runs through Kafka commands/events
+- Before payment (user waiting): Orchestrator → Room `ReserveRoom`, Booking `CreateBooking`, Payment `CreatePaymentIntent` over **gRPC**, sync
+- Stripe webhook → **Payment svc** → `PaymentAuthorized` event → orchestrator
+- After payment: **sequential** Kafka command → reply event: ConfirmReservation → CapturePayment (Stripe manual capture) → ConfirmBooking → `BookingConfirmed` (notification subscribes)
+- One compensation path (deadline or phase-A error): ReleaseRoom → ExpireBooking, looked up by `sagaId`
+- Every Kafka message goes through a transactional **outbox**; handlers are idempotent by checking the current status
 
-**Hexagonal layout per service** (`<svc>/`):
+**Repo layout:** one module per service, plus two shared modules in this repo, wired with `replace` directives:
+- `contracts/` (`booking/contracts`): proto + Kafka message definitions, one package per owning service, no infra deps
+- `platform/` (`booking/platform`): shared infra (outbox insert + poller), imported by adapters only
+
+**Hexagonal layout per service** (`<svc>/`, full trees in `doc/hexagonal-structure.md`):
 ```
-cmd/main.go            # manual DI: load config → pgxpool → repo → service → handler → router; graceful shutdown
+cmd/main.go            # manual DI: load config → pgxpool → repo → service → adapters; run servers/consumers/workers; graceful shutdown
 config/config.go       # env vars via godotenv (.env optional)
-internal/<domain>/     # CORE: entities, service (business logic), port interfaces (repository, publisher…)
-internal/adapter/      # handler (Gin + DTOs), postgres (pgx), kafka, redis… implement the core ports
+internal/<domain>/     # CORE: entities, service (business logic), port interfaces (repository, gateway, clients)
+internal/adapter/      # handler (Gin), grpc, kafka, worker, postgres, stripe… implement or drive the core ports
 db/migration/*.sql     # plain SQL, applied manually
 ```
 Rules:
-- The core (`internal/<domain>`) must not import adapters or infra libraries like gin or pgx. Ports are interfaces defined in the core.
+- The core (`internal/<domain>`) must not import adapters, infra libraries like gin or pgx, **or `booking/contracts`**. Adapters map proto / Kafka messages to domain types, the same way handlers map DTOs. Ports are interfaces defined in the core.
+- No publisher port: the repository writes the state change + outbox row in one tx, and the platform poller publishes.
 - Handlers map DTOs to domain models (`dto.go`, `ToXxx()` methods). They call services, never repositories.
 - A service may have more than one domain package, e.g. room-service has `room/` and `inventory/`.
 
 ## Conventions (follow existing code)
 
-- Go 1.25; each service is its **own Go module** (`module booking/<svc>-service`). There's no shared module besides the logger.
+- Go 1.25; each service is its **own Go module** (`module booking/<svc>-service`). Shared code: the logger (separate git repo) plus `contracts/` and `platform/` (modules in this repo, `replace` directives, not `go.work` alone, because `go mod tidy` ignores it).
 - Shared logger: `github.com/TranQuangPhong/hotel-booking-logger`, which is my own library. `slog.SetDefault(logger.NewLogger())` plus `logger.LoggingMiddleware()` in Gin.
-- HTTP: Gin, `gin.New()` + `Recovery` + logging middleware. Routes are `/<resource>/health` and `/<resource>/api/v1/...`.
+- HTTP: Gin, `gin.New()` + `Recovery` + logging middleware. Routes are `/<prefix>/health` and `/<prefix>/api/v1/...`, with a unique prefix per service (`/users`, `/rooms`, `/bookings`, `/orchestrator`, `/payments`). Versioning lives in code; the gateway (later) only routes and rewrites.
 - DB: `pgx/v5` + `pgxpool`, raw SQL, no ORM. Multi-table writes run in a transaction with `defer tx.Rollback(ctx)`, and bulk inserts use `pgx.Batch`.
 - IDs are UUIDs (`gen_random_uuid()`), handled as `string` in Go.
 - **Money is stored in minor units as `int64`** (cents), with a separate `currency CHAR(3)`.
@@ -90,4 +96,5 @@ Infra: `infra/postgresql/docker-compose.yml` currently defines only `postgres-bo
 4. CI/CD, monitoring, and logging.
 5. Later optimizations: Redis reservation lock or cache decorator, CDC.
 
-Undecided or not yet defined: gRPC proto definitions and their location, Kafka topic names, the final event contracts, Cancel booking (UC2), and Payment refund (UC3).
+Decided for UC1 (see `doc/uc1-create-booking/`): shared modules (`contracts/` with protos inside, `platform/`), Kafka topic names, v1 event contracts, booking statuses, `HOLD_TTL` 15 min.
+Undecided or not yet defined: Cancel booking (UC2) and Payment refund (UC3).

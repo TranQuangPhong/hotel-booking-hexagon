@@ -44,8 +44,10 @@ Next step:
 - Impl Usecase 1: Create booking order -> full flow: orchestrator -> booking -> room -> payment -> notify [NEXT]
     + Impl event (msg structure) module
     + Impl orchestrator
-    + Detailed design: doc/uc1-create-booking/ (README -> flows -> state-machines -> contracts -> data-model -> edge-cases)
+    + Detailed design: doc/uc1-create-booking/ (README -> flows -> state-machines -> contracts -> data-model -> good-to-have)
       -> supersedes "Suggested revised flow" below (change: declined card no longer ends the saga, only authorization or deadline does)
+      -> design is LEAN v1: some decisions below are cut to "good to have" (G#) in good-to-have.md
+         (CancelPayment on expiry, inbox tables, Idempotency-Key header, room sweeper / stale cleanup, recovery worker, extra envelope fields)
 
     UC1 design decisions (from architecture review)
     1. PSP webhook -> Payment svc (NOT orchestrator)
@@ -155,6 +157,7 @@ Next step:
         + Message-definition.json: update to the envelope in decision 8
 
     What to do first (order)
+        => replaced by build order M1..M6 in doc/uc1-create-booking/README.md (section 6)
         1. Fix design docs: webhook owner (1), timeout + manual capture (2), room-first + booking statuses (6) -> update diagram
         2. Define message envelope + command/event names (8)
         3. Room svc: reservations constraint + expire-stale-overlap + saga_id unique (5, 7)

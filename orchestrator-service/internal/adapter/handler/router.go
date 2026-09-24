@@ -10,17 +10,17 @@ func (h *OrchestratorHandler) Router() *gin.Engine {
 	r.Use(gin.Recovery())
 	r.Use(logger.LoggingMiddleware())
 
-	r.GET("/booking/health", func(c *gin.Context) {
+	r.GET("/orchestrator/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	v1 := r.Group("/booking")
+	v1 := r.Group("/orchestrator/api/v1")
 	{
-		v1.POST("/", h.CreateBooking)
-		// v1.POST("/:id/modify", h.ModifyBooking)
-		// v1.POST("/:id/cancel", h.CancelBooking)
-		v1.POST("/:id/payment", h.StartPaymentTxn)
-		// v1.POST("/:id/refund", h.Refund)
+		v1.POST("/bookings", h.CreateBooking)
+		// v1.POST("/bookings/:id/modify", h.ModifyBooking)
+		// v1.POST("/bookings/:id/cancel", h.CancelBooking)
+		v1.POST("/bookings/:id/payment", h.StartPaymentTxn)
+		// v1.POST("/bookings/:id/refund", h.Refund)
 	}
 
 	return r

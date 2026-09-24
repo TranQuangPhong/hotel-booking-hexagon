@@ -21,7 +21,7 @@ Usecase 1: Complete booking order (sync)
         - PSP responses -> payment svc response -> orches -> client
     3.4. Orches responses to client
 4. Client executes payment (PSP site)
-    - After finish, PSPS redirects client to GET /booking/{id}
+    - After finish, PSPS redirects client to booking page -> polls GET /bookings/api/v1/{id}
 5. PSP webhook -> Payment svc
     5.1. Payment svc
         - Receive webhook

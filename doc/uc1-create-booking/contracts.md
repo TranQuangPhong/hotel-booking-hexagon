@@ -1,100 +1,96 @@
-# UC1 contracts
+# UC1 contracts (v1)
 
-Field lists only, not full proto or JSON schemas. Enough to write handlers and messages consistently.
-Conventions: IDs are UUID strings, money is `int64` minor units + `currency` (ISO 4217, 3 letters), dates are `YYYY-MM-DD` (`checkOut` is exclusive), timestamps are RFC 3339 UTC.
+Conventions: IDs are UUID strings · money is `int64` minor units + `currency` (3 letters) · dates are `YYYY-MM-DD` (`checkOut` exclusive) · timestamps are RFC 3339 UTC.
 
 ## 1. Client REST
 
-Paths are shown logically. The real prefix follows the project rule `/<resource>/api/v1/...`. Note: the orchestrator router currently uses `/booking/` without `/api/v1`, so align it when implementing.
+Every service uses the same pattern: **`/<service-prefix>/health`** and **`/<service-prefix>/api/v1/...`**. The prefix is unique per service, so a gateway can route by prefix without ambiguity.
 
-| # | Service | Endpoint | Request | Success | Errors |
-|---|---|---|---|---|---|
-| 1 | Orchestrator | `POST /bookings` | header `Idempotency-Key` (UUID from client), JWT. Body: `roomId, checkIn, checkOut, numberOfGuests` | `201` `bookingId, status: "PENDING", totalAmount, currency, expiresAt` | `400` validation · `404 ROOM_NOT_FOUND` · `409 ROOM_UNAVAILABLE` · `409 REQUEST_IN_PROGRESS` (same key, still running) · `503 BOOKING_FAILED` |
-| 2 | Orchestrator | `POST /bookings/{id}/payment` | JWT | `200` `clientSecret, amount, currency, expiresAt` | `404` not found / not owner · `409 BOOKING_NOT_PAYABLE` (expired, already paid) · `503` |
-| 3 | Booking | `GET /bookings/{id}` | JWT | `200` booking incl. `status`, `paymentStatus`, `expiresAt` | `404` |
-| 4 | Payment | `POST /payments/webhooks/stripe` | raw body + `Stripe-Signature` header (**no JWT**, public) | `200` fast | `400` bad signature |
+| Service | Prefix |
+|---|---|
+| user | `/users` |
+| room | `/rooms` |
+| booking | `/bookings` |
+| orchestrator | `/orchestrator` |
+| payment | `/payments` |
 
-The client never sends a price. It gets `totalAmount` back from #1 to display it.
+| Service | Endpoint (internal path) | Request | Success | Errors |
+|---|---|---|---|---|
+| Orchestrator | `POST /orchestrator/api/v1/bookings` | user headers; `roomId, checkIn, checkOut, numberOfGuests` | `201` `bookingId, status, totalAmount, currency, expiresAt` | `400` · `404 ROOM_NOT_FOUND` · `409 ROOM_UNAVAILABLE` · `503` |
+| Orchestrator | `POST /orchestrator/api/v1/bookings/{id}/payment` | user headers | `200` `clientSecret, amount, currency, expiresAt` | `404` (not found / not owner) · `409 BOOKING_NOT_PAYABLE` · `503` |
+| Booking | `GET /bookings/api/v1/{id}` | — | `200` booking | `404` |
+| Payment | `POST /payments/api/v1/webhooks/stripe` | raw body + `Stripe-Signature` | `200` | `400` bad signature |
 
-## 2. gRPC (sync, orchestrator → participant)
+**Public vs internal (later, Phase 3):** the client will see one resource-oriented API, for example `POST /api/v1/bookings` routed to the orchestrator and `GET /api/v1/bookings/{id}` routed to booking svc. The API Gateway routes by method + path and rewrites to the internal paths above. In Phase 1 the client calls the internal paths directly.
 
-Every request carries `saga_id` (the idempotency key). The same `saga_id` returns the same result.
+**Versioning** lives in the code (`/api/v1`), and the gateway only passes it through. gRPC versions through the proto package (`room.v1`), Kafka messages through `schemaVersion` (G7), and `/health` is not versioned.
 
-**`room.v1.RoomService/ReserveRoom`**
-- req: `saga_id, room_id, check_in, check_out`
-- resp: `reservation_id, expires_at, room_number, room_type, currency, total_amount, nightly_rates[] {date, price}`
-- errors: `NOT_FOUND` (room) · `FAILED_PRECONDITION` + reason `ROOM_UNAVAILABLE` (overlap, maintenance day, or missing inventory) · `INVALID_ARGUMENT`
+## 2. gRPC (orchestrator → participant)
 
-**`booking.v1.BookingService/CreateBooking`**
-- req: `saga_id, reservation_id, user {id, name, email, phone}, room {id, number, type}, check_in, check_out, number_of_guests, nightly_rates[], total_amount, currency, expires_at`
-- resp: `booking_id, status`
-- errors: `INVALID_ARGUMENT`
+`saga_id` in every request. An existing `saga_id` returns the existing result.
 
-**`payment.v1.PaymentService/CreatePaymentIntent`**
-- req: `saga_id, booking_id, amount, currency`
-- resp: `payment_id, client_secret`
-- errors: `FAILED_PRECONDITION` + reason `PAYMENT_CANCELLED` (the saga already cancelled payment, E4) · `UNAVAILABLE` (Stripe down)
-
-Retry rule for the orchestrator: `UNAVAILABLE` / `DEADLINE_EXCEEDED` → retry (same `saga_id`). Anything else is final.
+| Method | Request | Response | Errors |
+|---|---|---|---|
+| `room.v1.RoomService/ReserveRoom` | `saga_id, room_id, check_in, check_out, expires_at` | `reservation_id, room_number, room_type, currency, total_amount, nightly_rates[]{date, price}` | `NOT_FOUND` · `FAILED_PRECONDITION` `ROOM_UNAVAILABLE` |
+| `booking.v1.BookingService/CreateBooking` | `saga_id, reservation_id, user{id, name, email, phone}, room{id, number, type}, check_in, check_out, number_of_guests, nightly_rates[], total_amount, currency, expires_at` | `booking_id, status` | `INVALID_ARGUMENT` |
+| `payment.v1.PaymentService/CreatePaymentIntent` | `saga_id, booking_id, amount, currency` | `payment_id, client_secret` | `UNAVAILABLE` (Stripe) |
 
 ## 3. Kafka topics
 
-| Topic | Producer | Consumers (group) | Messages |
+| Topic | Producer | Consumer groups | Messages |
 |---|---|---|---|
 | `room.commands` | orchestrator | room-service | `ConfirmReservation`, `ReleaseRoom` |
-| `room.events` | room | orchestrator-service | `ReservationConfirmed`, `ReservationConfirmFailed`, `RoomReleased` |
-| `payment.commands` | orchestrator | payment-service | `CapturePayment`, `CancelPayment` |
-| `payment.events` | payment | orchestrator-service | `PaymentAuthorized`, `PaymentCaptured`, `PaymentCaptureFailed`, `PaymentCancelled` |
+| `room.events` | room | orchestrator-service | `ReservationConfirmed`, `RoomReleased` |
+| `payment.commands` | orchestrator | payment-service | `CapturePayment` |
+| `payment.events` | payment | orchestrator-service | `PaymentAuthorized`, `PaymentCaptured`, `PaymentCaptureFailed` |
 | `booking.commands` | orchestrator | booking-service | `ConfirmBooking`, `ExpireBooking` |
 | `booking.events` | booking | orchestrator-service, notification-service | `BookingConfirmed`, `BookingExpired` |
 
-- **Key = `sagaId`** on every message, so ordering is per saga.
-- A consumer ignores (acks) any `type` it doesn't handle. This lets topics gain new message types (UC2, UC3) without breaking old consumers.
-- Commands go to exactly one owner, while events can have many subscribers. That's why notification reads `booking.events` and receives no commands.
+Key = `sagaId`. Consumers ack and skip any `type` they don't handle.
 
-## 4. Message catalog (`data` field of the envelope)
+## 4. Messages (12)
 
-| Type | Kind | Topic | `data` fields |
-|---|---|---|---|
-| `PaymentAuthorized` | event | payment.events | `paymentId, bookingId, amount, currency` |
-| `ConfirmReservation` | command | room.commands | `reservationId` |
-| `ReservationConfirmed` | event | room.events | `reservationId` |
-| `ReservationConfirmFailed` | event | room.events | `reservationId, reason` (`RELEASED`, `EXPIRED`, `NOT_FOUND`) |
-| `CapturePayment` | command | payment.commands | `paymentId, amount, currency` |
-| `PaymentCaptured` | event | payment.events | `paymentId, amount, currency` |
-| `PaymentCaptureFailed` | event | payment.events | `paymentId, reason` |
-| `ConfirmBooking` | command | booking.commands | `bookingId` |
-| `BookingConfirmed` | event | booking.events | `bookingId, userId, userName, userEmail, roomNumber, roomType, checkIn, checkOut, numberOfGuests, totalAmount, currency` (**fat event**, notification needs it all) |
-| `CancelPayment` | command | payment.commands | `reason` (`DEADLINE`, `ROOM_CONFIRM_FAILED`). Keyed by `sagaId`, not paymentId (E4) |
-| `PaymentCancelled` | event | payment.events | `paymentId` (null if none existed) |
-| `ReleaseRoom` | command | room.commands | `reservationId` (null if unknown, then room svc looks it up by `sagaId`, E1), `reason` (`DEADLINE`, `BOOKING_CREATE_FAILED`, `ROOM_CONFIRM_FAILED`) |
-| `RoomReleased` | event | room.events | `reservationId` |
-| `ExpireBooking` | command | booking.commands | `bookingId, reason` |
-| `BookingExpired` | event | booking.events | `bookingId, userId, userEmail, reason` |
+Participants find their row **by `sagaId`** from the envelope, so most commands need no `data`.
 
-Naming: commands are **imperative** (`DoThing`) and go to one owner. Events are **past tense** (`ThingDone`) and anyone may listen.
+| Type | Kind | `data` |
+|---|---|---|
+| `PaymentAuthorized` | event | `paymentId, bookingId, amount, currency` |
+| `ConfirmReservation` | command | — |
+| `ReservationConfirmed` | event | `reservationId` |
+| `CapturePayment` | command | — |
+| `PaymentCaptured` | event | `paymentId, amount, currency` |
+| `PaymentCaptureFailed` | event | `paymentId, reason` |
+| `ConfirmBooking` | command | — |
+| `BookingConfirmed` | event | `bookingId, userId, userName, userEmail, roomNumber, roomType, checkIn, checkOut, numberOfGuests, totalAmount, currency` (fat event: notification needs no lookups) |
+| `ReleaseRoom` | command | `reason` (`DEADLINE`, `PHASE_A_ERROR`) |
+| `RoomReleased` | event | `reservationId` (null if there was nothing to release) |
+| `ExpireBooking` | command | `reason` |
+| `BookingExpired` | event | `bookingId` (null if there was no booking) |
 
-## 5. Envelope
+Naming: commands are imperative and go to one owner; events are past tense and anyone may listen.
+
+## 5. Envelope (v1)
 
 Example: [`../Message-definition.json`](../Message-definition.json).
 
-| Field | Type | Meaning |
-|---|---|---|
-| `messageId` | UUID | unique per message; the **inbox dedupe key**. A re-sent command gets a new one |
-| `kind` | `command` \| `event` | |
-| `type` | string | a name from the catalog above |
-| `schemaVersion` | int | version of `data` for this `type`; bump on breaking change |
-| `producer` | string | e.g. `payment-service` |
-| `sagaId` | UUID | saga instance; also the Kafka key |
-| `correlationId` | UUID | one ID for the whole user journey. Created at `POST /bookings`, it goes into logs (slog attr) and HTTP/gRPC metadata. In UC1 it's often the same value as sagaId, but it's kept separate because one journey can span several sagas later (book → cancel → refund) |
-| `causationId` | UUID \| null | `messageId` of the message that caused this one; rebuilds the chain in `saga_message_log` |
-| `occurredAt` | timestamp | when the state change happened (not the publish time) |
-| `data` | object | payload from the catalog |
+| Field | Meaning |
+|---|---|
+| `messageId` | UUID, unique per message (logs, outbox row ID) |
+| `type` | name from the table above |
+| `sagaId` | saga instance; also the Kafka key and the lookup key for participants |
+| `producer` | e.g. `payment-service` |
+| `occurredAt` | when the state change happened |
+| `data` | payload |
 
-No `user` blob and no `saga` block. Personal data only goes into the `data` of messages that really need it (`BookingConfirmed`, `BookingExpired`).
+`kind`, `schemaVersion`, `correlationId` and `causationId` are G7. Personal data only appears in the `data` of `BookingConfirmed`.
 
 ## Proto location
 
-**Recommendation (open question Q2):** put a root `proto/` folder with `room/v1`, `booking/v1` and `payment/v1`, generated with `buf` into **one** Go module, `booking/contracts`, which works the same way as your logger library. It also holds the envelope struct and the `data` structs for Kafka messages, so producer and consumer share one definition. Each service imports it through `replace booking/contracts => ../contracts` (or a `go.work` at the root).
+**Decided (Q2):** there are two shared Go modules **inside this repo**, rather than separate git repos or one module per service:
 
-The alternative is to copy the generated code into each service. It avoids a shared module, but the copies drift and it's easy to forget one. Not worth it with only one developer.
+- **`contracts/`** (`booking/contracts`) holds **definitions only**, with no infra dependencies. It has one package per owning service, each containing the `.proto`, its generated code, and the Kafka `data` structs, plus a shared `envelope/`. Commands belong to the receiver's package and events to the emitter's. A service imports only the packages it needs.
+- **`platform/`** (`booking/platform`) holds shared **infra** code, starting with `outbox/` (Insert + Poller). Only adapters import it.
+
+Both are wired with `replace` directives. Full layout and import rules are in [hexagonal-structure.md](../hexagonal-structure.md).
+
+Why not separate repos: contracts change almost daily during UC1, and a tag-and-bump cycle for each change is too slow. Revisit if they stabilize.

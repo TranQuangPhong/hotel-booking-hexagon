@@ -1,12 +1,8 @@
 {
   "messageId": "0f8b6f2e-3c1a-4c55-9a7e-6d2b1f0c9a11",
-  "kind": "event",
   "type": "PaymentAuthorized",
-  "schemaVersion": 1,
-  "producer": "payment-service",
   "sagaId": "5b2e0c4d-8f3a-4e1b-b6c7-2a9d0e1f3c44",
-  "correlationId": "5b2e0c4d-8f3a-4e1b-b6c7-2a9d0e1f3c44",
-  "causationId": null,
+  "producer": "payment-service",
   "occurredAt": "2026-03-01T10:15:00Z",
   "data": {
     "paymentId": "a1c3e5f7-2b4d-4f6a-8c0e-1d3f5a7b9c22",

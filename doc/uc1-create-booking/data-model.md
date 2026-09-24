@@ -1,13 +1,12 @@
-# UC1 data model changes
+# UC1 data model changes (v1)
 
 These are **deltas** against the current migrations, written as sketches. You write the real migrations.
 
-## Shared by every service that consumes or produces Kafka
+## Outbox (Room, Booking, Payment)
 
-Room, Booking and Payment each get these two tables. The orchestrator uses `saga_message_log` for both jobs instead (see below).
+The orchestrator uses its `saga_message_log` as the outbox instead (see below).
 
 ```sql
--- Outbox: written in the same tx as the state change; the poller publishes it.
 CREATE TABLE outbox (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     message_id    UUID NOT NULL UNIQUE,
@@ -18,59 +17,47 @@ CREATE TABLE outbox (
     published_at  TIMESTAMPTZ
 );
 CREATE INDEX idx_outbox_unpublished ON outbox (id) WHERE published_at IS NULL;
-
--- Inbox: dedupe incoming messages; inserted in the same tx as the side effect.
-CREATE TABLE processed_messages (
-    message_id    UUID PRIMARY KEY,
-    processed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 ```
 
-**Outbox poller** (one goroutine per service):
-1. Every ~500 ms, in one transaction: `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`.
-2. Produce each row (sync, `acks=all`), then `UPDATE outbox SET published_at = now()`.
-3. A crash between produce and update means the message is re-published. That's fine, because consumers dedupe.
-4. Order is kept per key because rows are sent in `id` order.
+**Poller** (write it once in `booking/platform/outbox`, parametrized by table name; imported only by adapters):
+1. Every ~500 ms, in one tx: `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`.
+2. Produce each row (sync, `acks=all`) → `UPDATE … SET published_at = now()` → commit.
+3. A crash after produce means a re-publish, which consumers handle through the status check.
 
-Cleanup of old published rows is for later.
+No inbox tables in v1: the status check makes handlers idempotent (G5).
 
 ## Orchestrator
 
-`saga_instances`: add or change
+`saga_instances`:
 
 | Column | Change | Why |
 |---|---|---|
-| `user_id TEXT NOT NULL` | add | owner check on `POST /bookings/{id}/payment`; scope of the idempotency key |
-| `idempotency_key TEXT NOT NULL` | add, `UNIQUE (user_id, idempotency_key)` | client double-click → the same saga |
-| `deadline_at TIMESTAMPTZ` | add | set when entering `AWAITING_PAYMENT` |
-| `reservation_id` | `TEXT` → `UUID` | reservations use UUID |
-| `payment_intent_id` | rename → `payment_id UUID` | the orchestrator knows our payment ID, never Stripe's |
-| `version` | keep or drop | all writes use `SELECT … FOR UPDATE` in short transactions, so it's optional |
+| `user_id TEXT NOT NULL` | add | owner check on `POST …/payment` |
+| `deadline_at TIMESTAMPTZ NOT NULL` | add | set at saga start (`now + HOLD_TTL`) |
+| `reservation_id` | `TEXT` → `UUID` | |
+| `payment_intent_id` | rename → `payment_id UUID` | the orchestrator knows our payment ID, not Stripe's |
+| `version` | drop (optional) | all writes use `SELECT … FOR UPDATE` |
 
 ```sql
 CREATE INDEX idx_saga_deadline ON saga_instances (deadline_at)
-    WHERE current_step = 'AWAITING_PAYMENT';
+    WHERE "status" = 'IN_PROGRESS';
 ```
 
-`context` JSONB holds everything needed to **rebuild any call or command** (for the recovery worker): user snapshot, room snapshot, dates, guests, nightly rates, total, currency, `expiresAt`.
+`context` JSONB: user snapshot, room snapshot, dates, guests, nightly rates, total, currency. It holds everything needed to build the next call.
 
-`saga_message_log` works as **both outbox (OUT) and inbox (IN)**:
+`saga_message_log` becomes the orchestrator's **outbox** (OUT rows only in v1):
 
 | Column | Change |
 |---|---|
-| `message_id UUID NOT NULL UNIQUE` | add. Inbox dedupe for IN rows, and the envelope `messageId` for OUT rows |
-| `topic TEXT` | add (OUT rows) |
-| `published_at TIMESTAMPTZ` | add (OUT rows; the poller sets it) |
-| `"type"` | ENUM `message_type` → `TEXT` + `CHECK` (the list grows with every use case; see plan.md) |
+| `message_id UUID NOT NULL UNIQUE` | add |
+| `topic TEXT NOT NULL` | add |
+| `published_at TIMESTAMPTZ` | add |
+| `"type"` | ENUM → `TEXT` + `CHECK` (grows with every use case) |
+| `correlation_id` / `causation_id` | make nullable or drop for now (G7) |
 
-```sql
-CREATE INDEX idx_saga_log_unpublished ON saga_message_log (id)
-    WHERE direction = 'OUT' AND published_at IS NULL;
-```
+Logging IN rows for audit is G8.
 
 ## Room
-
-`reservations`:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS btree_gist;
@@ -82,61 +69,38 @@ ALTER TABLE reservations
         WHERE ("status" IN ('RESERVED', 'CONFIRMED'));
 ```
 
-- `daterange(check_in, check_out)` is `[check_in, check_out)` by default, which matches "check-out day is free for the next guest".
-- Inserting an overlapping row fails with SQLSTATE `23P01` (exclusion_violation). The repository maps it to the domain error `ErrRoomUnavailable`, which the gRPC layer turns into `FAILED_PRECONDITION`.
-- `ReserveRoom` transaction:
-  1. `UPDATE reservations SET status='EXPIRED' WHERE room_id=$1 AND status='RESERVED' AND expires_at + HOLD_GRACE < now() AND daterange(...) && daterange($2,$3)`
-  2. read inventory for the months covering the stay; every night must exist and be `AVAILABLE`
-  3. `INSERT` the reservation
-  4. commit
-
-`inventory.days` JSONB: each day becomes `{ "status": "AVAILABLE" | "MAINTENANCE", "price": 12000, "currency": "USD" }`.
-Remove `RESERVED` / `BOOKED` and `booking_id`. Occupancy lives only in `reservations`, so the Go `InventoryDay` struct and `InventoryDayStatus` constants change to match.
-
-Plus `outbox` and `processed_messages`.
+- `daterange` is `[check_in, check_out)`, so the check-out day is free for the next guest.
+- An overlap fails with SQLSTATE `23P01`, which the repository maps to `ErrRoomUnavailable`, which becomes gRPC `FAILED_PRECONDITION`.
+- `reservation_status` enum: v1 uses `RESERVED`, `CONFIRMED`, `RELEASED` (`EXPIRED` stays unused until G6).
+- `inventory.days` JSONB: each day becomes `{ "status": "AVAILABLE" | "MAINTENANCE", "price": 12000, "currency": "USD" }`. Remove `RESERVED` / `BOOKED` / `booking_id`, because occupancy lives only in `reservations`.
 
 ## Booking
 
 | Change | Why |
 |---|---|
-| `saga_id UUID NOT NULL UNIQUE` | idempotent `CreateBooking` |
-| `reservation_id UUID NOT NULL` | link to the hold (reference only, no FK across services) |
-| `expires_at TIMESTAMPTZ` | countdown in the UI while `PENDING` |
-| `booking_status` / `payment_status` enums | see [state-machines.md](state-machines.md#booking) |
+| `saga_id UUID NOT NULL UNIQUE` | idempotent CreateBooking + lookup for commands |
+| `reservation_id UUID NOT NULL` | reference only |
+| `expires_at TIMESTAMPTZ` | UI countdown while `PENDING` |
+| `booking_status` enum | see [state-machines.md](state-machines.md#booking) |
 
-Plus `outbox` and `processed_messages`.
-
-## Payment (new service)
+## Payment (new)
 
 ```sql
-CREATE TYPE payment_state AS ENUM ('CREATED','AUTHORIZED','CAPTURED','CANCELLED','CAPTURE_FAILED');
+CREATE TYPE payment_state AS ENUM ('CREATED', 'AUTHORIZED', 'CAPTURED', 'CAPTURE_FAILED');
 
 CREATE TABLE payments (
     id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     saga_id                UUID NOT NULL UNIQUE,
     booking_id             UUID NOT NULL,
-    amount                 BIGINT NOT NULL,           -- minor units
+    amount                 BIGINT NOT NULL,
     currency               CHAR(3) NOT NULL,
     "status"               payment_state NOT NULL,
-    psp                    TEXT NOT NULL DEFAULT 'stripe',
-    psp_payment_intent_id  TEXT UNIQUE,               -- pi_...
+    psp_payment_intent_id  TEXT NOT NULL UNIQUE,     -- pi_...; the webhook looks up by this
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
--- Webhook dedupe + audit (Stripe retries webhooks).
-CREATE TABLE psp_webhook_events (
-    psp_event_id  TEXT PRIMARY KEY,                   -- evt_...
-    "type"        TEXT NOT NULL,
-    payload       JSONB NOT NULL,
-    received_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 ```
 
-- Cancel before the intent exists (E4): `CancelPayment` with no payment row inserts a row `status = CANCELLED, psp_payment_intent_id = NULL`. A later `CreatePaymentIntent` for that `saga_id` then finds a `CANCELLED` row and returns `PAYMENT_CANCELLED`.
-- Plus `outbox` and `processed_messages`.
+## Notification
 
-## Notification (MongoDB)
-
-Collection `notifications`: `{ messageId (unique index), bookingId, type, channel: "email", to, status: "SENT" | "FAILED", createdAt }`.
-The unique `messageId` is its inbox. Phase 1 "sends" by logging, and Phase 3 plugs in SES behind a `Sender` port.
+No storage in v1 (log only). MongoDB log + SES = G9.
