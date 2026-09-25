@@ -2,12 +2,12 @@ package handler
 
 import "github.com/gin-gonic/gin"
 
-type OrchestratorHandler struct{}
+type Handler struct{}
 
-func NewOrchestratorHandler() *OrchestratorHandler {
-	return &OrchestratorHandler{}
+func New() *Handler {
+	return &Handler{}
 }
 
-func (h *OrchestratorHandler) CreateBooking(c *gin.Context) {}
+func (h *Handler) CreateBooking(c *gin.Context) {}
 
-func (h *OrchestratorHandler) StartPaymentTxn(c *gin.Context) {}
+func (h *Handler) StartPaymentTxn(c *gin.Context) {}

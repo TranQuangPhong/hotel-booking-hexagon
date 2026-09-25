@@ -104,7 +104,7 @@ Next step:
         + Naming: commands imperative (ReserveRoom, ConfirmReservation, CapturePayment),
           events past tense (RoomReserved, PaymentAuthorized, BookingConfirmed)
     9. Status updates must check current status (current code = happy path only)
-        + booking UpdateBookingStatus: conditional update WHERE id = $1 AND status = ANY($expected)
+        + booking UpdateStatus: conditional update WHERE id = $1 AND status = ANY($expected)
         + Check RowsAffected: 0 rows = not found / already applied / invalid transition -> handle explicitly
         + Same rule for reservation status + payment status updates
         + Gives idempotency + protection against late/duplicate/out-of-order messages

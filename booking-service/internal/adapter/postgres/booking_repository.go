@@ -17,7 +17,7 @@ func NewBookingRepository(ctx context.Context, pool *pgxpool.Pool) *BookingRepos
 	return &BookingRepository{pool: pool}
 }
 
-func (r *BookingRepository) GetBookingDetailByID(ctx context.Context, id string) (*booking.BookingDetail, error) {
+func (r *BookingRepository) GetDetailByID(ctx context.Context, id string) (*booking.Detail, error) {
 	// Select bookings table
 	sqlBooking := `select id,
 	 user_id, user_name, user_email, user_phone_number,
@@ -29,7 +29,7 @@ func (r *BookingRepository) GetBookingDetailByID(ctx context.Context, id string)
 	 from bookings
 	 where id = $1`
 
-	var b booking.BookingDetail
+	var b booking.Detail
 	if err := r.pool.QueryRow(ctx, sqlBooking, id).Scan(&b.ID,
 		&b.UserID, &b.UserName, &b.UserEmail, &b.UserPhoneNumber,
 		&b.RoomID, &b.RoomNumber, &b.RoomType,
@@ -63,7 +63,7 @@ func (r *BookingRepository) GetBookingDetailByID(ctx context.Context, id string)
 	return &b, nil
 }
 
-func (r *BookingRepository) GetBookingDetailByUserID(ctx context.Context, userID string) ([]*booking.BookingDetail, error) {
+func (r *BookingRepository) GetDetailsByUserID(ctx context.Context, userID string) ([]*booking.Detail, error) {
 	// Select bookings table
 	sqlBooking := `
 	SELECT id,
@@ -82,11 +82,11 @@ func (r *BookingRepository) GetBookingDetailByUserID(ctx context.Context, userID
 	}
 	defer bookingRows.Close()
 
-	var bookings []*booking.BookingDetail
+	var bookings []*booking.Detail
 	var bookingIDs []string
 
 	for bookingRows.Next() {
-		var b booking.BookingDetail
+		var b booking.Detail
 		if err := bookingRows.Scan(&b.ID,
 			&b.UserID, &b.UserName, &b.UserEmail, &b.UserPhoneNumber,
 			&b.RoomID, &b.RoomNumber, &b.RoomType,
@@ -131,7 +131,7 @@ func (r *BookingRepository) GetBookingDetailByUserID(ctx context.Context, userID
 	return bookings, nil
 }
 
-func (r *BookingRepository) CreateBooking(ctx context.Context, booking *booking.BookingDetail) (string, error) {
+func (r *BookingRepository) Create(ctx context.Context, booking *booking.Detail) (string, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return "", fmt.Errorf("begin tx: %w", err)
@@ -188,7 +188,7 @@ func (r *BookingRepository) CreateBooking(ctx context.Context, booking *booking.
 	return booking.ID, nil
 }
 
-func (r *BookingRepository) UpdateBookingStatus(ctx context.Context, id string, status booking.BookingStatus) error {
+func (r *BookingRepository) UpdateStatus(ctx context.Context, id string, status booking.Status) error {
 	const sql = `UPDATE bookings SET status = $2, updated_at = NOW() WHERE id = $1`
 
 	if _, err := r.pool.Exec(ctx, sql, id, status); err != nil {

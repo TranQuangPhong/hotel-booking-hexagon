@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (h *BookingHandler) BookingRouter() *gin.Engine {
+func (h *Handler) BookingRouter() *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(logger.LoggingMiddleware())

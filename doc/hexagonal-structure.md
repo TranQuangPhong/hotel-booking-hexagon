@@ -91,7 +91,7 @@ orchestrator-service/
 │   │   ├── saga.go                   # Saga entity, Step + Status enums, context      (was state.go)
 │   │   ├── transitions.go            # UC1: the transition table: (step, input) -> action + next step
 │   │   ├── service.go                # UC1: StartBooking, StartPayment, OnEvent, ExpireOverdue   (was orchestrator.go)
-│   │   ├── repository.go             # UC1 port: SagaRepository (Create, GetForUpdate, Save(saga, commands))
+│   │   ├── repository.go             # UC1 port: saga.Repository (Create, GetForUpdate, Save(saga, commands))
 │   │   └── participants.go           # UC1 ports: RoomClient, BookingClient, PaymentClient (sync calls)
 │   │
 │   └── adapter/
@@ -118,14 +118,14 @@ room-service/
 ├── internal/
 │   ├── room/                         ===== CORE: room catalog (CRUD, done) =====
 │   │   ├── room.go
-│   │   ├── room_repository.go        # port
-│   │   └── room_service.go
+│   │   ├── repository.go             # port
+│   │   └── service.go
 │   │
 │   ├── inventory/                    ===== CORE: prices + holds =====
-│   │   ├── inventory.go              # InventoryDay {status AVAILABLE|MAINTENANCE, price, currency}
+│   │   ├── inventory.go              # inventory.Day {status AVAILABLE|MAINTENANCE, price, currency}
 │   │   ├── reservation.go            # UC1: Reservation entity + status enum
-│   │   ├── inventory_repository.go   # port (+ UC1: CreateReservation, Confirm, Release by sagaID)
-│   │   ├── inventory_service.go      # UC1: ReserveRoom, ConfirmReservation, ReleaseRoom
+│   │   ├── repository.go             # port (+ UC1: CreateReservation, Confirm, Release by sagaID)
+│   │   ├── service.go                # UC1: ReserveRoom, ConfirmReservation, ReleaseRoom
 │   │   └── errors.go                 # UC1: ErrRoomUnavailable, ...
 │   │
 │   └── adapter/
@@ -156,7 +156,7 @@ booking-service/
 │   │   ├── booking.go                # Booking, statuses (PENDING, BOOKED, EXPIRED, …)
 │   │   ├── nightly_rate.go
 │   │   ├── repository.go             # port (+ UC1: Confirm, Expire by sagaID)
-│   │   └── service.go                # CreateBooking (idempotent by sagaID), UC1: ConfirmBooking, ExpireBooking
+│   │   └── service.go                # Create (idempotent by sagaID), UC1: Confirm, Expire
 │   │
 │   └── adapter/
 │       ├── handler/                  # REST /bookings/api/v1 (GET list, GET by id)

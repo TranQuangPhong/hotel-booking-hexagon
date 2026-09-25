@@ -58,9 +58,9 @@ func main() {
 
 	// Init repository, service, handler, router
 	roomRepository := postgres.NewRoomRepository(ctx, pool)
-	roomService := room.NewRoomService(roomRepository)
-	inventoryService := inventory.NewInventoryService()
-	roomHander := handler.NewRoomHandler(roomService, inventoryService)
+	roomService := room.NewService(roomRepository)
+	inventoryService := inventory.NewService()
+	roomHander := handler.New(roomService, inventoryService)
 	router := roomHander.RoomRouter()
 
 	// Start http server

@@ -7,16 +7,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type UserHandler struct {
-	service *user.UserService
+type Handler struct {
+	service *user.Service
 }
 
-func NewUserHandler(s *user.UserService) *UserHandler {
-	return &UserHandler{service: s}
+func New(s *user.Service) *Handler {
+	return &Handler{service: s}
 }
 
-func (h *UserHandler) GetUsers(c *gin.Context) {
-	users, err := h.service.GetUsers(c.Request.Context())
+func (h *Handler) GetUsers(c *gin.Context) {
+	users, err := h.service.GetAll(c.Request.Context())
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
 		return
@@ -24,9 +24,9 @@ func (h *UserHandler) GetUsers(c *gin.Context) {
 	c.JSON(200, users)
 }
 
-func (h *UserHandler) GetUserByID(c *gin.Context) {
+func (h *Handler) GetUserByID(c *gin.Context) {
 	id := c.Param("id")
-	user, err := h.service.GetUserByID(c.Request.Context(), id)
+	user, err := h.service.GetByID(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(404, gin.H{"error": fmt.Errorf("%w", err).Error()})
 		return
@@ -34,14 +34,14 @@ func (h *UserHandler) GetUserByID(c *gin.Context) {
 	c.JSON(200, user)
 }
 
-func (h *UserHandler) CreateUser(c *gin.Context) {
+func (h *Handler) CreateUser(c *gin.Context) {
 	var req *CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": fmt.Errorf("invalid request body: %w", err).Error()})
 		return
 	}
 	user := req.ToUser()
-	newUser, err := h.service.CreateUser(c.Request.Context(), user)
+	newUser, err := h.service.Create(c.Request.Context(), user)
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
 		return
@@ -49,7 +49,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 	c.JSON(201, newUser)
 }
 
-func (h *UserHandler) UpdateUser(c *gin.Context) {
+func (h *Handler) UpdateUser(c *gin.Context) {
 	var req *UpdateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": fmt.Errorf("invalid request body: %w", err).Error()})
@@ -58,7 +58,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	id := c.Param("id")
 	user := req.ToUser(id)
 
-	updatedUser, err := h.service.UpdateUser(c.Request.Context(), user)
+	updatedUser, err := h.service.Update(c.Request.Context(), user)
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
 		return

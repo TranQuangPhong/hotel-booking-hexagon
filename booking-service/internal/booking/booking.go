@@ -27,7 +27,7 @@ type Booking struct {
 	TotalAmount int64  `db:"total_amount" json:"total_amount"`
 	Currency    string `db:"currency" json:"currency"`
 
-	Status        BookingStatus `db:"status" json:"status"`
+	Status        Status `db:"status" json:"status"`
 	PaymentStatus PaymentStatus `db:"payment_status" json:"payment_status"`
 
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
@@ -35,27 +35,27 @@ type Booking struct {
 }
 
 // Booking detail includes nightly rates
-type BookingDetail struct {
+type Detail struct {
 	Booking
 	NightlyRates []NightlyRate `json:"nightly_rates"`
 }
 
 // Booking status
-type BookingStatus string
+type Status string
 
 const (
-	StatusPending           BookingStatus = "PENDING"
-	StatusReserved          BookingStatus = "RESERVED"
-	StatusReservationFailed BookingStatus = "RESERVATION_FAILED"
-	StatusPaymentFailed     BookingStatus = "PAYMENT_FAILED"
-	StatusBooked            BookingStatus = "BOOKED"
-	StatusCancelled         BookingStatus = "CANCELLED"
-	StatusCheckedIn         BookingStatus = "CHECKED_IN"
-	StatusCheckedOut        BookingStatus = "CHECKED_OUT"
-	StatusNoShow            BookingStatus = "NO_SHOW"
+	StatusPending           Status = "PENDING"
+	StatusReserved          Status = "RESERVED"
+	StatusReservationFailed Status = "RESERVATION_FAILED"
+	StatusPaymentFailed     Status = "PAYMENT_FAILED"
+	StatusBooked            Status = "BOOKED"
+	StatusCancelled         Status = "CANCELLED"
+	StatusCheckedIn         Status = "CHECKED_IN"
+	StatusCheckedOut        Status = "CHECKED_OUT"
+	StatusNoShow            Status = "NO_SHOW"
 )
 
-func (s BookingStatus) IsValid() bool {
+func (s Status) IsValid() bool {
 	switch s {
 	case StatusPending, StatusReserved, StatusReservationFailed, StatusPaymentFailed, StatusBooked, StatusCancelled, StatusCheckedIn, StatusCheckedOut, StatusNoShow:
 		return true

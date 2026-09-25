@@ -70,6 +70,7 @@ Rules:
 - DB: `pgx/v5` + `pgxpool`, raw SQL, no ORM. Multi-table writes run in a transaction with `defer tx.Rollback(ctx)`, and bulk inserts use `pgx.Batch`.
 - IDs are UUIDs (`gen_random_uuid()`), handled as `string` in Go.
 - **Money is stored in minor units as `int64`** (cents), with a separate `currency CHAR(3)`.
+- Names don't repeat their package: `user.Service`, `user.Repository`, `user.NewService`, `handler.Handler` + `handler.New`, `config.DB`. The package's main entity is the exception (`room.Room`, `config.Config`). Core port/service methods drop the entity too: `GetAll`, `GetByID`, `Create`, `UpdateStatus`, `GetDetailsByUserID` (plural for slices). gRPC RPC names (`CreateBooking`) and HTTP handler methods (`h.GetUsers`) keep it, because their package doesn't imply the entity. Core files are `repository.go` / `service.go`; adapter files keep the entity prefix (`postgres/room_repository.go`).
 - Status enums are Go `type X string` constants with `IsValid()`, mirrored by Postgres `ENUM` types.
 - Errors are wrapped with context: `fmt.Errorf("failed to ...: %w", err)`.
 - Config comes from env: `SERVER_PORT`, `DB_HOST/PORT/USER/PASSWORD/NAME`, `KAFKA_BROKERS` (comma-separated). `.env.example` is only a template, so identical values across services (like the port) are intentional. The real `.env` is gitignored, local only, and I set it up myself for each service.

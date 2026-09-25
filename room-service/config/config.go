@@ -10,16 +10,16 @@ import (
 )
 
 type Config struct {
-	Server ServerConfig
-	DB     DBConfig
-	Kafka  KafkaConfig
+	Server Server
+	DB     DB
+	Kafka  Kafka
 }
 
-type ServerConfig struct {
+type Server struct {
 	Port int
 }
 
-type DBConfig struct {
+type DB struct {
 	Host     string
 	Port     int
 	User     string
@@ -27,7 +27,7 @@ type DBConfig struct {
 	Name     string
 }
 
-type KafkaConfig struct {
+type Kafka struct {
 	Brokers []string
 }
 
@@ -52,17 +52,17 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		Server: ServerConfig{
+		Server: Server{
 			Port: serverPort,
 		},
-		DB: DBConfig{
+		DB: DB{
 			Host:     os.Getenv("DB_HOST"),
 			Port:     dbPort,
 			User:     os.Getenv("DB_USER"),
 			Password: os.Getenv("DB_PASSWORD"),
 			Name:     os.Getenv("DB_NAME"),
 		},
-		Kafka: KafkaConfig{
+		Kafka: Kafka{
 			Brokers: brokers,
 		},
 	}, nil

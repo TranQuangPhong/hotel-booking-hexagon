@@ -1,0 +1,2 @@
+-- payments table (saga_id UNIQUE, status enum CREATED | AUTHORIZED | CAPTURED | CAPTURE_FAILED).
+-- Schema: doc/uc1-create-booking/data-model.md (payments).

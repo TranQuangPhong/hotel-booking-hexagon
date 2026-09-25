@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (h *RoomHandler) RoomRouter() *gin.Engine {
+func (h *Handler) RoomRouter() *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(logger.LoggingMiddleware())

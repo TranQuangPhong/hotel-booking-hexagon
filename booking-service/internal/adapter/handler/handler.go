@@ -7,17 +7,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type BookingHandler struct {
-	bookingService *booking.BookingService
+type Handler struct {
+	bookingService *booking.Service
 }
 
-func NewBookingHandler(s *booking.BookingService) *BookingHandler {
-	return &BookingHandler{bookingService: s}
+func New(s *booking.Service) *Handler {
+	return &Handler{bookingService: s}
 }
 
-func (h *BookingHandler) GetBookings(c *gin.Context) {
+func (h *Handler) GetBookings(c *gin.Context) {
 	userID := c.Param("user_id") //TODO: Extract from JWT
-	bookings, err := h.bookingService.GetBookingDetailByUserID(c, userID)
+	bookings, err := h.bookingService.GetDetailsByUserID(c, userID)
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
 		return
@@ -25,9 +25,9 @@ func (h *BookingHandler) GetBookings(c *gin.Context) {
 	c.JSON(200, bookings)
 }
 
-func (h *BookingHandler) GetBookingByID(c *gin.Context) {
+func (h *Handler) GetBookingByID(c *gin.Context) {
 	bookingID := c.Param("id")
-	booking, err := h.bookingService.GetBookingDetailByID(c, bookingID)
+	booking, err := h.bookingService.GetDetailByID(c, bookingID)
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
 		return

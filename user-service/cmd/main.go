@@ -57,8 +57,8 @@ func main() {
 
 	// Init repository, service, handler, router
 	userRepository := postgres.NewUserRepository(ctx, pool)
-	userService := user.NewUserService(userRepository)
-	userHandler := handler.NewUserHandler(userService)
+	userService := user.NewService(userRepository)
+	userHandler := handler.New(userService)
 	router := userHandler.UserRouter()
 
 	// Start http server

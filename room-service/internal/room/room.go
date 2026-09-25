@@ -5,28 +5,28 @@ import "time"
 type Room struct {
 	ID        string     `json:"id" db:"id"`
 	Number    string     `json:"number" db:"number"`
-	Type      RoomType   `json:"type" db:"type"`
-	Status    RoomStatus `json:"status" db:"status"`
+	Type      Type   `json:"type" db:"type"`
+	Status    Status `json:"status" db:"status"`
 	CreatedAt time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
 }
 
-type RoomStatus string
-type RoomType string
+type Status string
+type Type string
 
 const (
-	Active   RoomStatus = "ACTIVE"   // Room is open for business
-	Inactive RoomStatus = "INACTIVE" // Out of order indefinitely
-	Archived RoomStatus = "ARCHIVED" // Physically removed/deleted
+	Active   Status = "ACTIVE"   // Room is open for business
+	Inactive Status = "INACTIVE" // Out of order indefinitely
+	Archived Status = "ARCHIVED" // Physically removed/deleted
 )
 
 const (
-	Standard RoomType = "STANDARD"
-	Deluxe   RoomType = "DELUXE"
-	Suite    RoomType = "SUITE"
+	Standard Type = "STANDARD"
+	Deluxe   Type = "DELUXE"
+	Suite    Type = "SUITE"
 )
 
-func (s RoomStatus) isValid() bool {
+func (s Status) isValid() bool {
 	switch s {
 	case Active, Inactive, Archived:
 		return true
@@ -34,7 +34,7 @@ func (s RoomStatus) isValid() bool {
 	return false
 }
 
-func (t RoomType) isValid() bool {
+func (t Type) isValid() bool {
 	switch t {
 	case Standard, Deluxe, Suite:
 		return true

@@ -14,8 +14,8 @@ func (req *CreateRoomRequest) ToRoom() *room.Room {
 	}
 	return &room.Room{
 		Number: req.Number,
-		Type:   room.RoomType(req.Type),
-		Status: room.RoomStatus(req.Status),
+		Type:   room.Type(req.Type),
+		Status: room.Status(req.Status),
 	}
 }
 
@@ -29,6 +29,6 @@ func (req UpdateRoomRequest) ToRoom(id string) *room.Room {
 	return &room.Room{
 		ID:     id,
 		Number: req.Number,
-		Type:   room.RoomType(req.Type),
-		Status: room.RoomStatus(req.Status)}
+		Type:   room.Type(req.Type),
+		Status: room.Status(req.Status)}
 }

@@ -5,7 +5,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (h *OrchestratorHandler) Router() *gin.Engine {
+func (h *Handler) Router() *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(logger.LoggingMiddleware())

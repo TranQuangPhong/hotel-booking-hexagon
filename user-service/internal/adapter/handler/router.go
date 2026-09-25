@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (h *UserHandler) UserRouter() *gin.Engine {
+func (h *Handler) UserRouter() *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(logger.LoggingMiddleware())
