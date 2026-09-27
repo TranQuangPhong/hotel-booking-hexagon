@@ -1,57 +1,81 @@
 Hotel booking system
+Details: doc/uc1-create-booking/
 
-1. AWS API gateway
+0. Communication
+- Client -> Orchestrator: REST
+- Orchestrator -> Room / Booking / Payment: gRPC (before payment, user is waiting)
+- Orchestrator <-> Room / Booking / Payment: Kafka cmd -> reply event (after payment)
+- Every Kafka msg goes through an outbox table (same DB tx as the state change)
+
+1. AWS API gateway (later)
+- Route client requests to services
 
 2. User service
 - Store user profile only
-- AWS Cognito handles sign up, login & ROLE
-- AWS Lambda to sync Cognito -> User service DB
+- AWS Cognito handles sign up, login & ROLE (later)
+- AWS Lambda to sync Cognito -> User service DB (later)
+- REST
+    + GET /users
+    + GET /users/{id}
+    + POST /users
+    + PUT /users/{id}
+- Techstack: Golang + PostgreSQL
 
 3. Room service
-- Room info (type, price, status)
+- Room info (type, status)
+- Inventory: price per day, open/closed day
+- Reservations: hold a room for a date range (no double booking)
+- REST
     + GET /rooms
     + GET /rooms/{id}
-    + POST /rooms/
+    + POST /rooms
     + PUT /rooms/{id}
-    + DELETE /rooms/{id}
-- Inventory (year, month, day)
-    + Reserve room          - gRPC              - TODO
-    + Release room          - kafka consumer    - TODO
+- gRPC
+    + ReserveRoom
+- Kafka
+    + cmd:   ConfirmReservation, ReleaseRoom
+    + event: ReservationConfirmed, RoomReleased
+- Techstack: Golang + PostgreSQL (+ Redis lock later)
 
 4. Booking service
-- GET /bookings
-- GET /bookings/{id}
-- POST /bookings                  - gRPC                - downstream of orchestrator
-- POST /bookings/{id}/modify      - kafka consumer      - downstream of orchestrator
-- POST /bookings/{id}/cancel      - kafka consumer      - downstream of orchestrator
+- Booking order: user & room snapshot, dates, price per night
+- REST
+    + GET /bookings
+    + GET /bookings/{id}       - client polls booking status
+- gRPC
+    + CreateBooking
+- Kafka
+    + cmd:   ConfirmBooking, ExpireBooking
+    + event: BookingConfirmed, BookingExpired
+- Techstack: Golang + PostgreSQL
 
 5. Payment service
-- Receive payment request from user
-    + POST /bookings/{id}/payment   - start tnx     - downstream of orchestrator
-    + POST /bookings/{id}/refund    - refund        - downstream of orchestrator
-    + POST /bookings/{id}/invoice   - invoice       - downstream of orchestrator
-- Integrate 3rd party payment provider
-    + Call PSP to create/confirm/cancel/capture payment intent
-    + Receive webhook from payment intent -> publish msg to orches
+- Payment record, integrate PSP (Stripe)
+- Create payment intent, receive webhook, capture payment
+- REST
+    + POST /payments/webhooks/stripe    - Stripe calls it
+- gRPC
+    + CreatePaymentIntent
+- Kafka
+    + cmd:   CapturePayment
+    + event: PaymentAuthorized, PaymentCaptured, PaymentCaptureFailed
+- Techstack: Golang + PostgreSQL + Stripe (sandbox)
 
 6. Notification service
 - Send notification email
-- AWS SES (simple email service)
+- Kafka
+    + event (subscribe): BookingConfirmed
+- Techstack: Golang + MongoDB (log every notification) + AWS SES (later)
 
 7. Orchestrator
-- Saga coordinator
-    + POST /bookings                (forward to booking svc)
-    + POST /bookings/{id}/payment   (forward to payment svc)
-    + POST /bookings/{id}/modify    (forward to booking svc)
-    + POST /bookings/{id}/cancel    (forward to booking svc)
-    + POST /bookings/{id}/refund    (forward to payment svc)
-- Kafka as system backbone
+- Saga coordinator: calls services, sends commands, reacts to events
+- Deadline worker: release the room if the user doesn't pay in time
+- REST
+    + POST /orchestrator/bookings                  - create booking (hold room)
+    + POST /orchestrator/bookings/{id}/payment     - start payment
+- Kafka
+    + cmd (send):      ConfirmReservation, ReleaseRoom, CapturePayment, ConfirmBooking, ExpireBooking
+    + event (consume): PaymentAuthorized, ReservationConfirmed, RoomReleased, PaymentCaptured, PaymentCaptureFailed, BookingConfirmed, BookingExpired
+- Techstack: Golang + PostgreSQL
 
-Techstack:
-1. AWS API gateway
-2. User Service: Golang + PostgreSQL (Lưu ID, Email, Role đồng bộ từ Cognito via Lambda).
-3. Room Service: Golang + PostgreSQL + Redis (Distributed Lock).
-4. Booking Service: Golang + PostgreSQL.
-5. Payment Service: Golang + PostgreSQL + Stripe (sandbox).
-6. Notification Service: Golang + MongoDB (Lưu log mọi email/thông báo) + AWS SES.
-7. Orchestrator: Golang + PostgreSQL.
+TODO: Cancel booking (UC2), Payment refund (UC3)
