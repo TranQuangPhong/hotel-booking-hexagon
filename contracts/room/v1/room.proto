@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package room.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "booking/contracts/room/v1;roomv1";
+
+message ReserveRoomRequest {
+  string saga_id = 1;
+  string room_id = 2;
+  string check_in = 3;                       // YYYY-MM-DD
+  string check_out = 4;                      // YYYY-MM-DD, exclusive
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+message ReserveRoomResponse {
+  string reservation_id = 1;
+  string room_number = 2;
+  string room_type = 3;
+  string currency = 4;
+  int64 total_amount = 5;                    // minor units
+  repeated NightlyRate nightly_rates = 6;
+}
+
+message NightlyRate {
+  string date = 1;
+  int64 price = 2;
+}
+
+service RoomService {
+  rpc ReserveRoom(ReserveRoomRequest) returns (ReserveRoomResponse);
+}
