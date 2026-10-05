@@ -4,7 +4,6 @@ import (
 	"booking/room-service/config"
 	"booking/room-service/internal/adapter/handler"
 	"booking/room-service/internal/adapter/postgres"
-	"booking/room-service/internal/inventory"
 	"booking/room-service/internal/room"
 	"context"
 	"fmt"
@@ -58,9 +57,9 @@ func main() {
 
 	// Init repository, service, handler, router
 	roomRepository := postgres.NewRoomRepository(ctx, pool)
+	// inventoryRepository := postgres.NewInventoryRepository(ctx, pool)
 	roomService := room.NewService(roomRepository)
-	inventoryService := inventory.NewService()
-	roomHander := handler.New(roomService, inventoryService)
+	roomHander := handler.New(roomService)
 	router := roomHander.RoomRouter()
 
 	// Start http server

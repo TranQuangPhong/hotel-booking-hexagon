@@ -72,7 +72,8 @@ ALTER TABLE reservations
 - `daterange` is `[check_in, check_out)`, so the check-out day is free for the next guest.
 - An overlap fails with SQLSTATE `23P01`, which the repository maps to `ErrRoomUnavailable`, which becomes gRPC `FAILED_PRECONDITION`.
 - `reservation_status` enum: v1 uses `RESERVED`, `CONFIRMED`, `RELEASED` (`EXPIRED` stays unused until G6).
-- `inventory.days` JSONB: each day becomes `{ "status": "AVAILABLE" | "MAINTENANCE", "price": 12000, "currency": "USD" }`. Remove `RESERVED` / `BOOKED` / `booking_id`, because occupancy lives only in `reservations`.
+- `inventories.days` JSONB: each day becomes `{ "status": "AVAILABLE" | "MAINTENANCE", "price": 12000 }`. Remove `RESERVED` / `BOOKED` / `booking_id`, because occupancy lives only in `reservations`. `currency` stays a column on the row (one currency per room-month), not repeated on every day.
+- Creating a room also creates `inventories` for the current month + next 11 (all days `AVAILABLE`), in the same transaction as the room insert.
 
 ## Booking
 

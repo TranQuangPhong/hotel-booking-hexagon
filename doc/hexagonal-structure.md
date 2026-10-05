@@ -122,7 +122,7 @@ room-service/
 │   │   └── service.go
 │   │
 │   ├── inventory/                    ===== CORE: prices + holds =====
-│   │   ├── inventory.go              # inventory.Day {status AVAILABLE|MAINTENANCE, price, currency}
+│   │   ├── inventory.go              # Inventory (currency per row) + Day {status AVAILABLE|MAINTENANCE, price}; NewMonths builder
 │   │   ├── reservation.go            # UC1: Reservation entity + status enum
 │   │   ├── repository.go             # port (+ UC1: CreateReservation, Confirm, Release by sagaID)
 │   │   ├── service.go                # UC1: ReserveRoom, ConfirmReservation, ReleaseRoom

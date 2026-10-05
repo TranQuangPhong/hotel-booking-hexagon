@@ -14,26 +14,66 @@ type Inventory struct {
 }
 
 type Day struct {
-	Status    DayStatus `json:"status"`
-	Price     int64     `json:"price"`                // minor-unit value of currency. Eg: USD -> store CENT value
-	BookingID string    `json:"booking_id,omitempty"` // reference purpose only
+	Status DayStatus `json:"status"`
+	Price  int64     `json:"price"` // minor-unit value of currency. Eg: USD -> store CENT value
+}
+
+// Rate is a nightly price: Price in minor units of Currency (ISO 4217, eg: USD)
+type Rate struct {
+	Price    int64
+	Currency string
+}
+
+func (r Rate) IsValid() bool {
+	if r.Price <= 0 || len(r.Currency) != 3 {
+		return false
+	}
+	for _, c := range r.Currency {
+		if c < 'A' || c > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 type DayStatus string
 
 const (
-	StatusAvailable DayStatus = "AVAILABLE"
-	// PENDING status for rooms that are in the process of being booked but not yet confirmed.
-	// This can help prevent race conditions where multiple users try to book the same room at the same time.
-	StatusReserved    DayStatus = "RESERVED"
-	StatusBooked      DayStatus = "BOOKED"
+	StatusAvailable   DayStatus = "AVAILABLE"
 	StatusMaintenance DayStatus = "MAINTENANCE"
 )
 
 func (s DayStatus) IsValid() bool {
 	switch s {
-	case StatusAvailable, StatusBooked, StatusMaintenance, StatusReserved:
+	case StatusAvailable, StatusMaintenance:
 		return true
 	}
 	return false
+}
+
+// NewMonths builds inventories for `months` consecutive months, starting at the month of `from` (UTC).
+// Every day is AVAILABLE at `rate`. RoomID is left empty: the caller sets it once the room exists.
+func NewMonths(from time.Time, months int, rate Rate) []*Inventory {
+	from = from.UTC()
+	// Normalize to the 1st: AddDate on day 29-31 overflows (Oct 31 + 1 month = Dec 1, November skipped)
+	start := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC)
+
+	inventories := make([]*Inventory, 0, months)
+	for i := range months {
+		year, month, _ := start.AddDate(0, i, 0).Date()
+		// Day 0 of next month = last day of this month (handles 28/29/30/31)
+		daysInMonth := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+
+		days := make(map[int8]Day, daysInMonth)
+		for d := 1; d <= daysInMonth; d++ {
+			days[int8(d)] = Day{Status: StatusAvailable, Price: rate.Price}
+		}
+		inventories = append(inventories, &Inventory{
+			Year:     int16(year),
+			Month:    int16(month),
+			Days:     days,
+			Currency: rate.Currency,
+		})
+	}
+	return inventories
 }

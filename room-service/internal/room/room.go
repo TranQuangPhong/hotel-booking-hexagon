@@ -1,14 +1,20 @@
 package room
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+// ErrInvalidInput marks errors caused by bad caller input (handler maps it to 400)
+var ErrInvalidInput = errors.New("invalid input")
 
 type Room struct {
-	ID        string     `json:"id" db:"id"`
-	Number    string     `json:"number" db:"number"`
-	Type      Type   `json:"type" db:"type"`
-	Status    Status `json:"status" db:"status"`
-	CreatedAt time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at" db:"updated_at"`
+	ID        string    `json:"id" db:"id"`
+	Number    string    `json:"number" db:"number"`
+	Type      Type      `json:"type" db:"type"`
+	Status    Status    `json:"status" db:"status"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type Status string
@@ -26,7 +32,7 @@ const (
 	Suite    Type = "SUITE"
 )
 
-func (s Status) isValid() bool {
+func (s Status) IsValid() bool {
 	switch s {
 	case Active, Inactive, Archived:
 		return true
@@ -34,7 +40,7 @@ func (s Status) isValid() bool {
 	return false
 }
 
-func (t Type) isValid() bool {
+func (t Type) IsValid() bool {
 	switch t {
 	case Standard, Deluxe, Suite:
 		return true

@@ -1,20 +1,19 @@
 package handler
 
 import (
-	"booking/room-service/internal/inventory"
 	"booking/room-service/internal/room"
+	"errors"
 	"fmt"
 
 	"github.com/gin-gonic/gin"
 )
 
 type Handler struct {
-	roomSerivce      *room.Service
-	inventoryService *inventory.Service
+	roomSerivce *room.Service
 }
 
-func New(rs *room.Service, is *inventory.Service) *Handler {
-	return &Handler{roomSerivce: rs, inventoryService: is}
+func New(s *room.Service) *Handler {
+	return &Handler{roomSerivce: s}
 }
 
 func (h *Handler) GetRooms(c *gin.Context) {
@@ -37,18 +36,23 @@ func (h *Handler) GetRoomByID(c *gin.Context) {
 }
 
 func (h *Handler) CreateRoom(c *gin.Context) {
-	var req *CreateRoomRequest
+	var req CreateRoomRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": fmt.Errorf("invalid request body: %w", err).Error()})
 		return
 	}
-	room := req.ToRoom()
-	newRoom, err := h.roomSerivce.Create(c.Request.Context(), room)
+
+	newRoom, err := h.roomSerivce.Create(c.Request.Context(), req.ToRoom(), req.ToRate())
 	if err != nil {
+		if errors.Is(err, room.ErrInvalidInput) {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
 		return
 	}
-	c.JSON(200, newRoom)
+
+	c.JSON(201, newRoom)
 }
 
 func (h *Handler) UpdateRoom(c *gin.Context) {

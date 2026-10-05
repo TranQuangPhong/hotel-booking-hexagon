@@ -1,9 +1,9 @@
-CREATE TABLE inventory (
+CREATE TABLE inventories (
     id BIGSERIAL PRIMARY KEY,
     room_id UUID NOT NULL REFERENCES rooms(id),
     "year" SMALLINT NOT NULL,
     "month" SMALLINT NOT NULL,
-    "days" JSONB NOT NULL, --status, price, booking id
+    "days" JSONB NOT NULL, --status, price
     currency VARCHAR(3) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
