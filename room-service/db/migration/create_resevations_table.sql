@@ -8,8 +8,8 @@ CREATE TYPE reservation_status AS ENUM (
 CREATE TABLE reservations (
     reservation_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     room_id         UUID NOT NULL REFERENCES rooms(id),
-    check_in        DATE NOT NULL,
-    check_out       DATE NOT NULL,          -- exclusive, i.e. last night is check_out - 1
+    check_in_date   DATE NOT NULL,
+    check_out_date  DATE NOT NULL,          -- exclusive, i.e. last night is check_out_date - 1
     "status"        reservation_status NOT NULL DEFAULT 'RESERVED',
     expires_at      TIMESTAMPTZ NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),

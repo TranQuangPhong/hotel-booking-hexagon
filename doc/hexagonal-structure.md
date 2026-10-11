@@ -11,13 +11,13 @@ hotel-booking-hexagon/
 │   ├── go.mod
 │   ├── buf.yaml, buf.gen.yaml    # protobuf generation config
 │   ├── envelope/
-│   │   └── envelope.go           # Kafka envelope: messageId, type, sagaId, producer, occurredAt, data
+│   │   └── envelope.go           # Kafka envelope: message_id, type, saga_id, producer, occurred_at, data
 │   ├── room/v1/                  # owned by room-service
 │   │   ├── room.proto            # gRPC: ReserveRoom
 │   │   ├── room.pb.go, room_grpc.pb.go   # generated, never edit by hand
 │   │   └── messages.go           # commands room accepts + events room emits (data structs, type names, topics)
 │   ├── booking/v1/               # owned by booking-service (CreateBooking, ConfirmBooking, BookingConfirmed...)
-│   └── payment/v1/               # owned by payment-service (CreatePaymentIntent, PaymentAuthorized...)
+│   └── payment/v1/               # owned by payment-service (CreateCheckoutSession, PaymentAuthorized...)
 │
 ├── platform/                     # module booking/platform: shared INFRA code, imported by adapters only
 │   ├── go.mod
@@ -172,16 +172,16 @@ booking-service/
 ```
 payment-service/
 ├── cmd/main.go                       # wire + start: gRPC, webhook REST, Kafka consumer, outbox poller
-├── config/config.go                  # + STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+├── config/config.go                  # + STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_SUCCESS_URL
 ├── internal/
 │   ├── payment/                      ===== CORE =====
 │   │   ├── payment.go                # Payment, status enum (CREATED, AUTHORIZED, CAPTURED, CAPTURE_FAILED)
-│   │   ├── gateway.go                # port: PaymentGateway (CreateIntent, Capture); Stripe is one implementation
+│   │   ├── gateway.go                # port: PaymentGateway (CreateCheckout, GetCheckout, Capture); Stripe is one implementation
 │   │   ├── repository.go             # port
-│   │   └── service.go                # CreateIntent, MarkAuthorized (from webhook), Capture
+│   │   └── service.go                # CreateCheckout, MarkAuthorized (from webhook), Capture
 │   │
 │   └── adapter/
-│       ├── grpc/server.go            # CreatePaymentIntent
+│       ├── grpc/server.go            # CreateCheckoutSession
 │       ├── handler/                  # POST /payments/api/v1/webhooks/stripe (verify signature -> MarkAuthorized)
 │       ├── kafka/                    # payment.commands consumer + mapper
 │       ├── stripe/gateway.go         # implements PaymentGateway (stripe-go)

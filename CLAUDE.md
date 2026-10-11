@@ -30,7 +30,7 @@ Key docs:
 - `doc/uc1-create-booking/`: **detailed UC1 design, the source of truth** (lean v1: flows, saga/entity state machines, REST/gRPC/Kafka contracts, schema deltas, build order M1–M6; cut items live in `good-to-have.md`, so don't pull them into v1 work)
 - `doc/architecture_uc_create_order.excalidraw`: one-page UC1 picture (keep in sync with `uc1-create-booking/`). `architecture_saga_deprecated.excalidraw` is outdated, so don't use it.
 - `doc/hexagonal-structure.md`: target folder layout per service
-- `doc/Message-definition.json`: example Kafka message envelope, v1 (messageId, type, sagaId, producer, occurredAt, data); fields explained in `uc1-create-booking/contracts.md`
+- `doc/Message-definition.json`: example Kafka message envelope, v1 (message_id, type, saga_id, producer, occurred_at, data); fields explained in `uc1-create-booking/contracts.md`
 - `doc/plan.md`: roadmap and current next step
 - `doc/Booking_hexagon.postman_collection.json`: manual API tests
 
@@ -38,7 +38,8 @@ Key docs:
 
 **Communication (UC1, create booking; details in `doc/uc1-create-booking/`):**
 - Client → (API Gateway later) → **Orchestrator** over REST
-- Before payment (user waiting): Orchestrator → Room `ReserveRoom`, Booking `CreateBooking`, Payment `CreatePaymentIntent` over **gRPC**, sync
+- Before payment (user waiting): Orchestrator → Room `ReserveRoom`, Booking `CreateBooking`, Payment `CreateCheckoutSession` over **gRPC**, sync
+- The user pays on Stripe's **hosted page** (Checkout Session, client is redirected to its URL), not an embedded Stripe.js form with a `client_secret`
 - Stripe webhook → **Payment svc** → `PaymentAuthorized` event → orchestrator
 - After payment: **sequential** Kafka command → reply event: ConfirmReservation → CapturePayment (Stripe manual capture) → ConfirmBooking → `BookingConfirmed` (notification subscribes)
 - One compensation path (deadline or phase-A error): ReleaseRoom → ExpireBooking, looked up by `sagaId`
@@ -71,6 +72,7 @@ Rules:
 - IDs are UUIDs (`gen_random_uuid()`), handled as `string` in Go.
 - **Money is stored in minor units as `int64`** (cents), with a separate `currency CHAR(3)`.
 - Names don't repeat their package: `user.Service`, `user.Repository`, `user.NewService`, `handler.Handler` + `handler.New`, `config.DB`. The package's main entity is the exception (`room.Room`, `config.Config`). Core port/service methods drop the entity too: `GetAll`, `GetByID`, `Create`, `UpdateStatus`, `GetDetailsByUserID` (plural for slices). gRPC RPC names (`CreateBooking`) and HTTP handler methods (`h.GetUsers`) keep it, because their package doesn't imply the entity. Core files are `repository.go` / `service.go`; adapter files keep the entity prefix (`postgres/room_repository.go`).
+- One name per field everywhere (REST, gRPC, Kafka, DB), `snake_case` in JSON. Flat structures prefix the owner (`user_phone_number`, `check_in_date`); nested objects drop it (`user.phone_number`, not `user.phone` or `user.user_phone_number`).
 - Status enums are Go `type X string` constants with `IsValid()`, mirrored by Postgres `ENUM` types.
 - Errors are wrapped with context: `fmt.Errorf("failed to ...: %w", err)`.
 - Config comes from env: `SERVER_PORT`, `DB_HOST/PORT/USER/PASSWORD/NAME`, `KAFKA_BROKERS` (comma-separated). `.env.example` is only a template, so identical values across services (like the port) are intentional. The real `.env` is gitignored, local only, and I set it up myself for each service.

@@ -17,9 +17,9 @@ sequenceDiagram
     participant R as Room svc
     participant B as Booking svc
 
-    C->>O: POST /bookings (user headers) roomId, checkIn, checkOut, guests
+    C->>O: POST /bookings (user headers) roomId, checkInDate, checkOutDate, guests
     Note over O: INSERT saga IN_PROGRESS / RESERVING_ROOM<br/>deadline_at = now + HOLD_TTL, context = user + request
-    O->>R: ReserveRoom(sagaId, roomId, checkIn, checkOut, expiresAt = deadline_at)
+    O->>R: ReserveRoom(sagaId, roomId, checkInDate, checkOutDate, expiresAt = deadline_at)
     Note over R: read inventory prices (every night AVAILABLE?)<br/>INSERT reservation RESERVED<br/>(exclusion constraint blocks overlaps)
     alt room not available
         R-->>O: FAILED_PRECONDITION ROOM_UNAVAILABLE
@@ -53,28 +53,34 @@ sequenceDiagram
 
     C->>O: POST /bookings/{id}/payment
     Note over O: load saga by bookingId<br/>check owner, step = AWAITING_PAYMENT, now < deadline_at
-    O->>P: CreatePaymentIntent(sagaId, bookingId, amount, currency)
-    Note over P: payment for sagaId exists? yes: return it
-    P->>S: create PaymentIntent (capture_method=manual, Idempotency-Key = sagaId)
-    S-->>P: pi_id, client_secret
-    Note over P: INSERT payment CREATED
-    P-->>O: paymentId, clientSecret
-    O-->>C: 200 clientSecret, amount, expiresAt
+    O->>P: CreateCheckoutSession(sagaId, bookingId, amount, currency)
+    Note over P: payment for sagaId exists? yes: retrieve its session, return the same URL
+    P->>S: create Checkout Session (capture_method=manual, metadata.saga_id, Idempotency-Key = sagaId)
+    S-->>P: cs_id, url
+    Note over P: INSERT payment CREATED (psp_session_id = cs_id)
+    P-->>O: paymentId, checkoutUrl
+    O-->>C: 200 checkoutUrl, amount, currency, expiresAt
 
-    C->>S: Stripe.js confirms card
+    C->>S: browser opens checkoutUrl, user enters the card on Stripe's page
     alt declined
-        S-->>C: error, user may retry (intent stays open)
+        S-->>C: error on the page, user may retry (session stays open)
     else authorized
-        S-->>C: requires_capture, client polls GET /bookings/{id}
+        S-->>C: redirect to success_url, client polls GET /bookings/{id}
         S->>P: webhook payment_intent.amount_capturable_updated
-        Note over P: verify signature<br/>payment CREATED to AUTHORIZED + outbox PaymentAuthorized
+        Note over P: verify signature, find payment by metadata.saga_id<br/>payment CREATED to AUTHORIZED, save pi_id + outbox PaymentAuthorized
         P-->>S: 200
         P-)O: PaymentAuthorized
     end
 ```
 
+- **Hosted page, not an embedded form.** The user pays on Stripe's own page (a Checkout Session). Our services only pass a URL, and no `client_secret` or card data goes through them.
+- Session parameters: `mode=payment`, cards only (`allowed_payment_method_types=card`, or `payment_method_types=card` if your stripe-go version doesn't have it; without it the page offers every method enabled in the Stripe dashboard), one line item (`amount`, `currency`, and a required product name such as `Booking <bookingId>`), `payment_intent_data.capture_method=manual`, `payment_intent_data.metadata.saga_id`, and `success_url` from config (`STRIPE_SUCCESS_URL`, with `{BOOKING_ID}` replaced). v1 sets no `cancel_url` and no `expires_at`.
+- Stripe creates the PaymentIntent only when the user submits the card. So the payment row starts with a session ID and no intent ID; the webhook finds the row through `metadata.saga_id` and saves the `pi_…` ID that `CapturePayment` needs.
+- A repeated call (page refresh, user comes back) retrieves the session from Stripe by `psp_session_id` and returns its URL again, so we store IDs only. Stripe only returns a URL while the session is open. If there is none (the user already paid, even when the webhook hasn't arrived yet), Payment answers `FAILED_PRECONDITION` and the orchestrator replies `409 BOOKING_NOT_PAYABLE`.
+- A failed `CreateCheckoutSession` never moves the saga: the client gets `503` (Stripe down, timeout) or `409`, the saga stays in `AWAITING_PAYMENT`, and the client may call again until the deadline. Only phase A errors go to phase D.
+- The session isn't tied to `deadline_at`: Stripe keeps it open for 24 h by default (30 min minimum), longer than `HOLD_TTL`. A payment made after the deadline is ignored (see phase C and E5).
 - Locally, `stripe listen --forward-to localhost:<port>/payments/api/v1/webhooks/stripe` delivers webhooks and prints the signing secret.
-- A duplicate webhook finds the payment already `AUTHORIZED` → return 200 and do nothing (rule 3).
+- A duplicate webhook finds the payment already `AUTHORIZED` → return 200 and do nothing (rule 3). An event without our `saga_id` (for example from `stripe trigger`) also gets 200 and is ignored.
 
 ---
 

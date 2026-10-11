@@ -1,5 +1,5 @@
 // Package paymentv1 holds payment-service's public contracts: the PaymentService
-// gRPC API (CreatePaymentIntent, generated from payment.proto) and the Kafka
+// gRPC API (CreateCheckoutSession, generated from payment.proto) and the Kafka
 // messages on its topics.
 //
 //   - payment.commands (payment accepts): CapturePayment
@@ -17,9 +17,9 @@ const (
 // message types
 const (
 	//event
-	TypePaymentAuthorized     = "PaymentAuthorized"
-	TypePaymentCaptured       = "PaymentCaptured"
-	TypePaymentCapturedFailed = "PaymentCapturedFailed"
+	TypePaymentAuthorized    = "PaymentAuthorized"
+	TypePaymentCaptured      = "PaymentCaptured"
+	TypePaymentCaptureFailed = "PaymentCaptureFailed"
 	//cmd
 	TypeCapturePayment = "CapturePayment"
 )
@@ -38,12 +38,11 @@ type PaymentCaptured struct {
 	Currency  string `json:"currency"`
 }
 
-type PaymentCapturedFailed struct {
+type PaymentCaptureFailed struct {
 	PaymentID string `json:"payment_id"`
 	Reason    string `json:"reason"`
 }
 
-// cmd payment svc to capture payment
-type CapturePayment struct {
-	PaymentID string `json:"payment_id"`
-}
+// cmd payment svc to capture payment.
+// No data: the payment is found by the envelope's saga_id
+type CapturePayment struct{}

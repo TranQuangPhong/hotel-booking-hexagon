@@ -1,3 +1,3 @@
 package grpcclient
 
-// Implements saga.PaymentClient: CreatePaymentIntent via payment.v1.PaymentService.
+// Implements saga.PaymentClient: CreateCheckoutSession via payment.v1.PaymentService.

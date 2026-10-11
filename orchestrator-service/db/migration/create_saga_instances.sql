@@ -25,7 +25,7 @@ CREATE TABLE saga_instances (
     -- don't exist yet at saga start (e.g. booking_id is null until step 2).
     booking_id          UUID,
     reservation_id      TEXT,
-    payment_intent_id   TEXT,
+    payment_id          UUID,
 
     -- Minimal workflow context needed to build the next outgoing command.
     -- Not a system of record for any entity — just enough to resume/replay.

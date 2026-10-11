@@ -9,51 +9,118 @@ Roadmap
 
 Done
 - User service: model, CRUD APIs, SQL, logging, tested
-- Room service: room model, CRUD APIs, SQL, tested
-- UC1 detailed design: doc/uc1-create-booking/ (v1 lean, decisions Q1-Q3 confirmed)
+- Room service: room model, CRUD APIs, SQL, tested. Creating a room also opens 12 months of inventory
+- UC1 detailed design: doc/uc1-create-booking/ (v1 lean, decisions Q1-Q4 confirmed)
 - Refactor: folder structure, naming, contracts/ + platform/ modules scaffolded
+- contracts/: envelope, messages, room / booking / payment proto + buf generated code
 
 UC1 build order (details: doc/uc1-create-booking/README.md section 6)
-- M1: contracts/ (envelope, room.proto + buf gen) + Room ReserveRoom gRPC + exclusion constraint   <- NEXT
+- M1: contracts/ (done) + Room ReserveRoom gRPC + exclusion constraint   <- NEXT
 - M2: Booking CreateBooking gRPC (idempotent by saga_id)
 - M3: Orchestrator phase A: POST /bookings -> ReserveRoom -> CreateBooking (no Kafka yet)
 - M4: Kafka + outbox poller + phase D (deadline worker -> ReleaseRoom -> ExpireBooking)
-- M5: Payment: CreatePaymentIntent + Stripe webhook -> PaymentAuthorized
+- M5: Payment: CreateCheckoutSession (Stripe hosted page) + Stripe webhook -> PaymentAuthorized
 - M6: Phase C (confirm room -> capture -> confirm booking) + notification consumer
 
-Next step: M1
-1. contracts/: envelope struct, room/v1/room.proto (ReserveRoom), generate code with buf
-    1.1. Envelope design (Go), shape = doc/Message-definition.json
-         + Envelope struct + json tags, Data as json.RawMessage (decode later by type)
-         + constructor New(type, sagaId, producer, data) -> sets messageId (UUID) + occurredAt (UTC)
-         + helper to decode Data into a typed struct
-    1.2. Envelope impl: contracts/envelope/envelope.go + small test (marshal -> unmarshal round trip)
-    1.3. Data structs design (per owning package)
-         + commands live in the receiver's package, events in the emitter's (room/v1, booking/v1, payment/v1)
-         + message type constants (ConfirmReservation, RoomReleased, ...) + topic constants (room.commands, room.events, ...)
-         + field types: IDs string, money int64 + currency, dates "YYYY-MM-DD" string, nullable -> pointer (RoomReleased.reservationId)
-    1.4. Data structs impl: <svc>/v1/messages.go for the 12 messages in contracts.md section 4
-         + only room ones are needed for M1, the rest can wait until M4/M6
-    1.5. ReserveRoom proto design: contracts/room/v1/room.proto
-         + package room.v1, go_package = "booking/contracts/room/v1;roomv1"
-           (generated code and messages.go share the folder -> same Go package name)
-         + service RoomService { rpc ReserveRoom(ReserveRoomRequest) returns (ReserveRoomResponse) }
-         + request:  saga_id, room_id, check_in, check_out, expires_at (google.protobuf.Timestamp)
-         + response: reservation_id, room_number, room_type, currency, total_amount (int64), repeated NightlyRate{date, price}
-         + errors = gRPC status, not proto fields: NOT_FOUND, FAILED_PRECONDITION + reason ROOM_UNAVAILABLE
-    1.6. buf setup
-         + install buf, protoc-gen-go, protoc-gen-go-grpc
-         + buf.yaml (v2, module root = contracts/), buf.gen.yaml (plugins go + go-grpc, paths=source_relative)
-    1.7. Generate: buf lint -> buf generate -> room.pb.go + room_grpc.pb.go
-         + commit generated code (services build without buf)
-         + go mod tidy in contracts/ (grpc + protobuf deps)
-    1.8. Wire into room-service: require booking/contracts + replace => ../contracts, go build ./...
-    Done when: buf lint clean, envelope test passes, contracts/ and room-service build
-2. Room DB: reservations.saga_id UNIQUE + btree_gist exclusion constraint; inventory days = price + AVAILABLE/MAINTENANCE
-3. Room core (internal/inventory): reservation entity, repository port, Reserve service (read prices, insert reservation)
-4. Room adapters: postgres repo (map 23P01 -> ErrRoomUnavailable), gRPC server (-> FAILED_PRECONDITION)
-5. Seed inventory SQL for a test room (no inventory admin API yet)
-6. Done when: grpcurl reserves; a 2nd overlapping call fails with ROOM_UNAVAILABLE
+Next step: M1, Room ReserveRoom gRPC   <- resume at step 1
+Not in M1: the orchestrator gRPC client (that is M3). Test with grpcurl
+Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
+
+1. Wire contracts into room-service: require booking/contracts + replace => ../contracts, go build ./...
+    + leftover: envelope round-trip test in contracts/envelope
+2. Migration (create_resevations_table.sql)
+    + CREATE EXTENSION IF NOT EXISTS btree_gist
+    + saga_id UUID NOT NULL UNIQUE
+    + EXCLUDE USING gist (room_id WITH =, daterange(check_in_date, check_out_date) WITH &&)
+      WHERE status IN (RESERVED, CONFIRMED) -> an overlap on the same room fails with SQLSTATE 23P01
+    + CHECK (check_out_date > check_in_date): a zero-night stay is an empty range, it overlaps nothing and would pass the constraint
+    + price snapshot: total_amount BIGINT, currency CHAR(3), nightly_rates JSONB ([{date, price}], write-once)
+3. Merge internal/inventory into internal/room (before writing Reserve)
+    + one package, one Service, one Repository port
+    + files: room.go, inventory.go, reservation.go, errors.go, repository.go, service.go
+    + watch name collisions: 3 status types (room, day, reservation), one ErrInvalidInput
+    + check: go build ./... and the Postman room CRUD still pass
+4. Core (internal/room)
+    + reservation.go: Reservation (with the price snapshot) + status RESERVED / CONFIRMED / RELEASED with IsValid()
+    + errors.go: ErrInvalidInput, ErrNotFound, ErrReservationReleased,
+      ErrRoomUnavailable (overlap, MAINTENANCE night, no inventory, room not ACTIVE)
+    + repository.go: InTx(ctx, fn), where fn gets a tx-bound Repository; get reservation by saga_id,
+      read inventories for the months of the stay, insert reservation
+    + service.go Reserve, every step inside one InTx:
+        a. read the room -> ErrNotFound
+        b. saga_id already has a reservation -> return it + the room's number / type (stored prices, nothing else is checked)
+           RELEASED -> ErrReservationReleased
+           "no reservation" is the normal first call: continue, never return it as ErrNotFound
+        c. new hold only: check_out after check_in (no zero-night) and check_in >= today (UTC), else ErrInvalidInput
+        d. new hold only: room ACTIVE -> every night exists and AVAILABLE -> nightly rates + total -> insert
+           (currency = the inventory row's currency. No mixed-currency check: E4 is skipped)
+    + nightly rates + total = a pure function with unit tests: stay crossing a month end, a year end,
+      and check-out on the 1st (that month's inventory row must not be required)
+5. Postgres adapter (one struct implements room.Repository; delete inventory_repository.go)
+    + InTx: Begin, defer Rollback, fn(copy of the struct bound to the tx), Commit
+      (the struct holds a small query interface that both the pool and a tx satisfy)
+    + the room + inventory reads of Reserve use FOR SHARE: an admin update of status / price waits for the hold to commit,
+      and two Reserve calls never block each other. The tx alone would not stop that race
+    + INSERT ... ON CONFLICT (saga_id) DO NOTHING RETURNING; no row -> SELECT by saga_id (two identical calls racing)
+    + 23P01 -> ErrRoomUnavailable, pgx.ErrNoRows -> ErrNotFound
+      (optional: 40P01 deadlock, from two simultaneous overlapping inserts -> ErrRoomUnavailable too)
+    + every query uses the request ctx, so the caller's 3 s deadline cancels a slow insert (see E6 below). No outbox row
+6. gRPC server (adapter/grpc/server.go): only maps, calls room.Service
+    + embed roomv1.UnimplementedRoomServiceServer
+    + validate here -> INVALID_ARGUMENT: saga_id + room_id are UUIDs, dates parse as YYYY-MM-DD, expires_at is set
+    + map: dates -> time.Time, expires_at.AsTime()
+    + errors: ErrInvalidInput        -> INVALID_ARGUMENT
+              ErrNotFound            -> NOT_FOUND
+              ErrRoomUnavailable     -> FAILED_PRECONDITION "ROOM_UNAVAILABLE"
+              ErrReservationReleased -> FAILED_PRECONDITION "RESERVATION_RELEASED"
+              anything else          -> INTERNAL (generic message, real error in the log)
+7. config + cmd/main.go
+    + GRPC_PORT (config.go, .env.example); net.Listen + grpc.NewServer + RegisterRoomServiceServer in a goroutine
+    + reflection.Register (dev only): grpcurl works without -proto flags
+    + GracefulStop() next to the HTTP Shutdown; import alias for adapter/grpc
+8. Done when (test room: POST /rooms, no seed SQL)
+    + grpcurl reserves
+    + a 2nd overlapping call fails with ROOM_UNAVAILABLE
+    + the same saga_id again returns the same reservation_id and prices
+    + a zero-night stay and a past check-in fail with INVALID_ARGUMENT
+
+Why (decided 2026-10-12)
+- Merge room + inventory: they depend on each other both ways (room create writes inventories in one tx; Reserve needs
+  the room's status, number, type) and Go forbids import cycles. Split again when a part gets a life of its own
+- Price snapshot on the reservation: an admin will be able to change inventory prices, so a repeated call must return what was
+  first quoted, not re-read inventory. JSONB because it is write-once and never queried by night
+- Reserve reads the room: the response carries room_number + room_type, and an INACTIVE / ARCHIVED room still has AVAILABLE days
+- Reserve in one tx with FOR SHARE reads: what it read (room status, day status, price) cannot change before the hold commits
+- The orchestrator makes one call (ReserveRoom) and checks nothing itself
+- Idempotent by saga_id: the same call or message arriving a second time (caller retry, Kafka redelivery) gives the same
+  result. Nobody triggers a repeat and there is no API for it; test it by sending the same request twice
+
+Notes for later milestones
+- M3: ReserveRoom error -> saga
+    + definite rejection (NOT_FOUND, INVALID_ARGUMENT, FAILED_PRECONDITION) -> saga FAILED, nothing to release, reply 404 / 400 / 409
+    + unknown outcome (timeout, UNAVAILABLE, INTERNAL) -> phase D, reply 503
+- M3: saga_instances migration is behind data-model.md: add deadline_at (= ReserveRoom expires_at) + user_id + idx_saga_deadline,
+  reservation_id TEXT -> UUID
+- M4: contracts room/v1 RoomReleased.ReservationID string -> *string (null when nothing was released)
+- E6 (accepted in v1): ReserveRoom commits after ReleaseRoom already found "no row" -> a hold that nobody releases
+  (the saga is FAILED, no sweeper). Mitigation: the request ctx on every query (step 5)
+- Later phases: extend the inventory horizon (a room gets 12 months at creation, nothing adds more)
+
+Cleanup (any time)
+- reservations migration: the EXPIRED enum value + both indexes are unused in v1 (they serve the G6 sweeper)
+- inventories migration: currency VARCHAR(3) -> CHAR(3)
+- handler.go: GetRoomByID returns 404 for every error, UpdateRoom returns 500 for a missing room -> use ErrNotFound
+
+Docs to sync
+- CLAUDE.md, hexagonal-structure.md: room-service has one domain package; Reserve = one tx with FOR SHARE reads;
+  GRPC_PORT in the config list
+- contracts.md: ReserveRoom errors + INVALID_ARGUMENT, RESERVATION_RELEASED
+- data-model.md: reservations price snapshot + CHECK (check_out_date > check_in_date)
+- flows.md, state-machines.md, README timers: room status + date validation in ReserveRoom; ReserveRoom is idempotent by saga_id
+  (a repeated call returns the stored row);
+  the M3 "error -> saga" rule above
+- good-to-have.md: add E6 and the inventory horizon; E4 becomes "not checked in v1"
+- use-cases.md line 35: "Update inventory" is stale (occupancy lives only in reservations)
 
 After UC1
 - UC2 cancel booking, UC3 payment refund: TODO, not designed

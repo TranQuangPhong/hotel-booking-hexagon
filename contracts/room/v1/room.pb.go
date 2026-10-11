@@ -26,8 +26,8 @@ type ReserveRoomRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SagaId        string                 `protobuf:"bytes,1,opt,name=saga_id,json=sagaId,proto3" json:"saga_id,omitempty"`
 	RoomId        string                 `protobuf:"bytes,2,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
-	CheckIn       string                 `protobuf:"bytes,3,opt,name=check_in,json=checkIn,proto3" json:"check_in,omitempty"`    // YYYY-MM-DD
-	CheckOut      string                 `protobuf:"bytes,4,opt,name=check_out,json=checkOut,proto3" json:"check_out,omitempty"` // YYYY-MM-DD, exclusive
+	CheckInDate   string                 `protobuf:"bytes,3,opt,name=check_in_date,json=checkInDate,proto3" json:"check_in_date,omitempty"`    // YYYY-MM-DD
+	CheckOutDate  string                 `protobuf:"bytes,4,opt,name=check_out_date,json=checkOutDate,proto3" json:"check_out_date,omitempty"` // YYYY-MM-DD, exclusive
 	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -77,16 +77,16 @@ func (x *ReserveRoomRequest) GetRoomId() string {
 	return ""
 }
 
-func (x *ReserveRoomRequest) GetCheckIn() string {
+func (x *ReserveRoomRequest) GetCheckInDate() string {
 	if x != nil {
-		return x.CheckIn
+		return x.CheckInDate
 	}
 	return ""
 }
 
-func (x *ReserveRoomRequest) GetCheckOut() string {
+func (x *ReserveRoomRequest) GetCheckOutDate() string {
 	if x != nil {
-		return x.CheckOut
+		return x.CheckOutDate
 	}
 	return ""
 }
@@ -238,12 +238,12 @@ var File_room_v1_room_proto protoreflect.FileDescriptor
 
 const file_room_v1_room_proto_rawDesc = "" +
 	"\n" +
-	"\x12room/v1/room.proto\x12\aroom.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb9\x01\n" +
+	"\x12room/v1/room.proto\x12\aroom.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xcb\x01\n" +
 	"\x12ReserveRoomRequest\x12\x17\n" +
 	"\asaga_id\x18\x01 \x01(\tR\x06sagaId\x12\x17\n" +
-	"\aroom_id\x18\x02 \x01(\tR\x06roomId\x12\x19\n" +
-	"\bcheck_in\x18\x03 \x01(\tR\acheckIn\x12\x1b\n" +
-	"\tcheck_out\x18\x04 \x01(\tR\bcheckOut\x129\n" +
+	"\aroom_id\x18\x02 \x01(\tR\x06roomId\x12\"\n" +
+	"\rcheck_in_date\x18\x03 \x01(\tR\vcheckInDate\x12$\n" +
+	"\x0echeck_out_date\x18\x04 \x01(\tR\fcheckOutDate\x129\n" +
 	"\n" +
 	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\xf4\x01\n" +
 	"\x13ReserveRoomResponse\x12%\n" +

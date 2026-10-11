@@ -9,8 +9,8 @@ option go_package = "booking/contracts/room/v1;roomv1";
 message ReserveRoomRequest {
   string saga_id = 1;
   string room_id = 2;
-  string check_in = 3;                       // YYYY-MM-DD
-  string check_out = 4;                      // YYYY-MM-DD, exclusive
+  string check_in_date = 3;                  // YYYY-MM-DD
+  string check_out_date = 4;                 // YYYY-MM-DD, exclusive
   google.protobuf.Timestamp expires_at = 5;
 }
 

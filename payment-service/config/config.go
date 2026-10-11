@@ -11,7 +11,7 @@ import (
 
 type Config struct {
 	Server Server // REST: Stripe webhook
-	GRPC   GRPC   // gRPC: CreatePaymentIntent
+	GRPC   GRPC   // gRPC: CreateCheckoutSession
 	DB     DB
 	Kafka  Kafka
 	Stripe Stripe
@@ -40,6 +40,7 @@ type Kafka struct {
 type Stripe struct {
 	SecretKey     string // API key (sandbox: sk_test_...)
 	WebhookSecret string // signing secret used to verify webhook requests (whsec_...)
+	SuccessURL    string // where the hosted payment page redirects after payment; {BOOKING_ID} is replaced
 }
 
 func Load() (Config, error) {
@@ -67,11 +68,13 @@ func Load() (Config, error) {
 		brokers[i] = strings.TrimSpace(brokers[i])
 	}
 
-	// Fail fast: an empty webhook secret would reject every Stripe webhook at runtime.
+	// Fail fast: an empty webhook secret would reject every Stripe webhook at runtime,
+	// and a hosted checkout session can't be created without a success URL.
 	stripeSecretKey := os.Getenv("STRIPE_SECRET_KEY")
 	stripeWebhookSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
-	if stripeSecretKey == "" || stripeWebhookSecret == "" {
-		return Config{}, fmt.Errorf("STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are required")
+	stripeSuccessURL := os.Getenv("STRIPE_SUCCESS_URL")
+	if stripeSecretKey == "" || stripeWebhookSecret == "" || stripeSuccessURL == "" {
+		return Config{}, fmt.Errorf("STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET and STRIPE_SUCCESS_URL are required")
 	}
 
 	return Config{
@@ -94,6 +97,7 @@ func Load() (Config, error) {
 		Stripe: Stripe{
 			SecretKey:     stripeSecretKey,
 			WebhookSecret: stripeWebhookSecret,
+			SuccessURL:    stripeSuccessURL,
 		},
 	}, nil
 }

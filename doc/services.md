@@ -51,11 +51,11 @@ Details: doc/uc1-create-booking/
 
 5. Payment service
 - Payment record, integrate PSP (Stripe)
-- Create payment intent, receive webhook, capture payment
+- Create checkout session (Stripe hosted page, client is redirected), receive webhook, capture payment
 - REST
     + POST /payments/webhooks/stripe    - Stripe calls it
 - gRPC
-    + CreatePaymentIntent
+    + CreateCheckoutSession
 - Kafka
     + cmd:   CapturePayment
     + event: PaymentAuthorized, PaymentCaptured, PaymentCaptureFailed

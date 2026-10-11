@@ -35,7 +35,7 @@ No inbox tables in v1: the status check makes handlers idempotent (G5).
 | `user_id TEXT NOT NULL` | add | owner check on `POST …/payment` |
 | `deadline_at TIMESTAMPTZ NOT NULL` | add | set at saga start (`now + HOLD_TTL`) |
 | `reservation_id` | `TEXT` → `UUID` | |
-| `payment_intent_id` | rename → `payment_id UUID` | the orchestrator knows our payment ID, not Stripe's |
+| `payment_id UUID` | done (was `payment_intent_id TEXT`) | the orchestrator knows our payment ID, not Stripe's |
 | `version` | drop (optional) | all writes use `SELECT … FOR UPDATE` |
 
 ```sql
@@ -65,11 +65,11 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 ALTER TABLE reservations
     ADD COLUMN saga_id UUID NOT NULL UNIQUE,
     ADD CONSTRAINT reservations_no_overlap
-        EXCLUDE USING gist (room_id WITH =, daterange(check_in, check_out) WITH &&)
+        EXCLUDE USING gist (room_id WITH =, daterange(check_in_date, check_out_date) WITH &&)
         WHERE ("status" IN ('RESERVED', 'CONFIRMED'));
 ```
 
-- `daterange` is `[check_in, check_out)`, so the check-out day is free for the next guest.
+- `daterange` is `[check_in_date, check_out_date)`, so the check-out day is free for the next guest.
 - An overlap fails with SQLSTATE `23P01`, which the repository maps to `ErrRoomUnavailable`, which becomes gRPC `FAILED_PRECONDITION`.
 - `reservation_status` enum: v1 uses `RESERVED`, `CONFIRMED`, `RELEASED` (`EXPIRED` stays unused until G6).
 - `inventories.days` JSONB: each day becomes `{ "status": "AVAILABLE" | "MAINTENANCE", "price": 12000 }`. Remove `RESERVED` / `BOOKED` / `booking_id`, because occupancy lives only in `reservations`. `currency` stays a column on the row (one currency per room-month), not repeated on every day.
@@ -96,11 +96,16 @@ CREATE TABLE payments (
     amount                 BIGINT NOT NULL,
     currency               CHAR(3) NOT NULL,
     "status"               payment_state NOT NULL,
-    psp_payment_intent_id  TEXT NOT NULL UNIQUE,     -- pi_...; the webhook looks up by this
+    psp_session_id         TEXT NOT NULL UNIQUE,     -- cs_...; retrieve the page URL again on a repeated call
+    psp_payment_intent_id  TEXT UNIQUE,              -- pi_...; NULL until the webhook, then used by CapturePayment
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
+
+- Stripe creates the PaymentIntent when the user pays on the hosted page, so `psp_payment_intent_id` is unknown at insert time.
+- The webhook finds the row by `saga_id` (sent to Stripe as PaymentIntent metadata), not by a Stripe ID.
+- Neither the page URL nor any Stripe secret is stored.
 
 ## Notification
 

@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package payment.v1;
+
+option go_package = "booking/contracts/payment/v1;paymentv1";
+
+message CreateCheckoutSessionRequest{
+    string saga_id = 1;
+    string booking_id = 2;
+    int64 amount = 3; //minor units
+    string currency = 4;
+}
+
+message CreateCheckoutSessionResponse{
+    string payment_id = 1;
+    string checkout_url = 2; //Stripe hosted payment page, the client is redirected to it
+}
+
+service PaymentService {
+    rpc CreateCheckoutSession(CreateCheckoutSessionRequest) returns (CreateCheckoutSessionResponse);
+}

@@ -45,13 +45,12 @@ type BookingExpired struct {
 	BookingID string `json:"booking_id"` //null if booking not exists
 }
 
-// cmd to confirm booking
-type ConfirmBooking struct {
-	BookingID string `json:"booking_id"`
-}
+// cmd to confirm booking.
+// No data: the booking is found by the envelope's saga_id
+type ConfirmBooking struct{}
 
-// cmd to expire booking
+// cmd to expire booking.
+// The booking is found by the envelope's saga_id
 type ExpireBooking struct {
-	BookingID string `json:"booking_id"`
-	Reason    string `json:"reason"`
+	Reason string `json:"reason"`
 }

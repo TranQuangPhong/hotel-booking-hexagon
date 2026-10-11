@@ -9,8 +9,8 @@ package roomv1
 
 // topics
 const (
-	TopicCommands = "booking.commands"
-	TopicEvents   = "booking.events"
+	TopicCommands = "room.commands"
+	TopicEvents   = "room.events"
 )
 
 // message types
@@ -31,13 +31,12 @@ type RoomReleased struct {
 	ReservationID string `json:"reservation_id"` // null if reservation not exists
 }
 
-// cmd to confirm reservation
-type ConfirmReservation struct {
-	ReservationID string `json:"reservation_id"`
-}
+// cmd to confirm reservation.
+// No data: the reservation is found by the envelope's saga_id
+type ConfirmReservation struct{}
 
-// cmd to release room
+// cmd to release room.
+// The reservation is found by the envelope's saga_id
 type ReleaseRoom struct {
-	ReservationID string `json:"reservation_id"`
-	Reason        string `json:"reason"` //DEADLINE, PHASE_A_ERROR
+	Reason string `json:"reason"` //DEADLINE, PHASE_A_ERROR
 }

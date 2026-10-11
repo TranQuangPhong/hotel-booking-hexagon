@@ -45,7 +45,7 @@ stateDiagram-v2
 | `CREATING_BOOKING` | ok | save bookingId | `AWAITING_PAYMENT` |
 | `RESERVING_ROOM`, `CREATING_BOOKING` | other gRPC error | outbox `ReleaseRoom` | `RELEASING_ROOM` |
 | `RESERVING_ROOM`, `CREATING_BOOKING`, `AWAITING_PAYMENT` | deadline worker | outbox `ReleaseRoom` | `RELEASING_ROOM` |
-| `AWAITING_PAYMENT` | `POST …/payment` | call CreatePaymentIntent, save paymentId | *(same)* |
+| `AWAITING_PAYMENT` | `POST …/payment` | call CreateCheckoutSession, save paymentId (gRPC error: reply `503` / `409`, save nothing) | *(same)* |
 | `AWAITING_PAYMENT` | `PaymentAuthorized` | outbox `ConfirmReservation` | `CONFIRMING_ROOM` |
 | `CONFIRMING_ROOM` | `ReservationConfirmed` | outbox `CapturePayment` | `CAPTURING_PAYMENT` |
 | `CAPTURING_PAYMENT` | `PaymentCaptured` | outbox `ConfirmBooking` | `CONFIRMING_BOOKING` |
@@ -98,17 +98,17 @@ Owned by payment svc.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> CREATED: CreatePaymentIntent
+    [*] --> CREATED: CreateCheckoutSession
     CREATED --> AUTHORIZED: webhook amount_capturable_updated
     AUTHORIZED --> CAPTURED: CapturePayment
     AUTHORIZED --> CAPTURE_FAILED: capture error
 ```
 
-| Stripe PaymentIntent status | `payments.status` |
+| Stripe | `payments.status` |
 |---|---|
-| `requires_payment_method` / `requires_confirmation` / `requires_action` | `CREATED` (declined attempts stay here) |
-| `requires_capture` | `AUTHORIZED` |
-| `succeeded` | `CAPTURED` |
+| Checkout Session `open` (no PaymentIntent yet, or a declined attempt) | `CREATED` |
+| PaymentIntent `requires_capture` | `AUTHORIZED` |
+| PaymentIntent `succeeded` | `CAPTURED` |
 
 `CANCELLED` (voiding the authorization on expiry) is G1.
 

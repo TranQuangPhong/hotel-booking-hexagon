@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package booking.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "booking/contracts/booking/v1;bookingv1";
+
+message CreateBookingRequest {
+    string saga_id = 1;
+    string reservation_id = 2;
+    User user = 3;
+    Room room = 4;
+    string check_in_date = 5; //YYYY-MM-DD
+    string check_out_date = 6; //YYYY-MM-DD, exclusive
+    int32 number_of_guests = 7;
+    int64 total_amount = 8; //minor units
+    string currency = 9;
+    repeated NightlyRate nightly_rates = 10;
+    google.protobuf.Timestamp expires_at = 11;
+}
+
+message CreateBookingResponse {
+    string booking_id = 1;
+    string status = 2;
+}
+
+message User {
+  string id = 1;
+  string name = 2;
+  string email = 3;
+  string phone_number = 4;
+}
+
+message Room {
+  string id = 1;
+  string number = 2;
+  string type = 3;
+}
+
+message NightlyRate {
+  string date = 1;
+  int64 price = 2;
+}
+
+service BookingService {
+    rpc CreateBooking(CreateBookingRequest) returns (CreateBookingResponse);
+}
