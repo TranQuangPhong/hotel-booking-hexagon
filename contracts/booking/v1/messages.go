@@ -1,12 +1,6 @@
-// Package bookingv1 holds booking-service's public contracts: the BookingService
-// gRPC API (CreateBooking, generated from booking.proto) and the Kafka messages
-// on its topics.
-//
-//   - booking.commands (booking accepts): ConfirmBooking, ExpireBooking
-//   - booking.events   (booking emits):   BookingConfirmed, BookingExpired
-//
-// This file holds the Kafka side: type names, topic names and data structs.
 package bookingv1
+
+// Kafka side of the booking contract: topic names, type names and data structs.
 
 // topics
 const (
@@ -40,9 +34,8 @@ type BookingConfirmed struct {
 	Currency        string `json:"currency"`
 }
 
-// message structures
 type BookingExpired struct {
-	BookingID string `json:"booking_id"` //null if booking not exists
+	BookingID *string `json:"booking_id"` // nil (JSON null) if there was no booking
 }
 
 // cmd to confirm booking.

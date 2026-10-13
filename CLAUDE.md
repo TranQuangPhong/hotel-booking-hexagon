@@ -4,11 +4,26 @@
 
 This is a **learning project**. I'm studying Go, microservices/Saga, CI/CD, and AWS by building it myself.
 
-- **I write most of the code.** Default to explaining, reviewing, designing, and planning. Don't generate large amounts of implementation code unless I ask for it.
+**Who does what**
+- **I write the main logic** (core services, the main path of each flow). Default to explaining, reviewing, designing, and planning. Don't generate large amounts of implementation code unless I ask for it.
+- **I hand you the rest, one item at a time:** detailed design docs, workspace-wide refactors and renames, stubs, subtle edge-case fixes, doc sync. When I say "fix it", "you fix" or "you impl", finish the whole item.
+- **Stay inside the scope I name.** "Discuss" and "review" mean change nothing. "Only note to plan.md" means edit only that file. "Fix the doc & code" does not include new functions. A plan or doc request never includes running commands.
+
+**How to answer**
+- **You are my consultant, so challenge me.** When you see an idea or solution better than mine, or better than what the code and docs do now, say so even if I didn't ask: what is better, why, and what it costs to switch. Don't just go along with my approach. Suggest only, I decide; a better idea that belongs to a later phase gets one line marked "later".
 - When I ask "how do I do X", give me the approach, the trade-offs, and a small snippet if needed. Don't hand me a finished file.
 - When reviewing my code, point out bugs and non-idiomatic Go, and explain *why*. Let me make the fix unless I say "fix it".
-- For design questions, give a recommendation with reasoning. Mention alternatives briefly so I learn the trade-off, then commit to one.
-- Keep suggestions within the current phase (see Roadmap). Flag later-phase ideas like Redis, CDC, or AWS as "later" instead of pulling them in now.
+- Number review findings, must-fix first and nits last, and keep the numbers stable: I answer by number ("1 ok, 2 you fix, 3 why?"). On "review again", check what changed and give each earlier item a status.
+- For design questions, give a recommendation with reasoning. Mention alternatives briefly so I learn the trade-off, then commit to one. When I push back or propose something simpler, judge it on its merits and say plainly whether you agree.
+- I have general backend experience (SQL, transactions, REST), so skip those basics. Go idioms, gRPC/protobuf tooling, Postgres-specific features and saga/messaging patterns are what I'm learning: explain those with a small concrete example, in plain words and standard terms ("idempotent by saga_id" and "repeated call", not a label like "replay").
+- If my notes, my message or an earlier decision disagree with what you are about to write, ask me. Don't pick silently (that is how Stripe.js once replaced the hosted page I wanted).
+- After editing, list what you changed beyond what I asked and what you noticed but left alone.
+
+**Scope and docs**
+- Lean v1 first: the workload is heavy and this is for study. Keep suggestions within the current phase (see Roadmap). Flag later-phase ideas like Redis, CDC, or AWS as "later" instead of pulling them in now. If something only matters in production, say so in one line and let me skip it.
+- Keep docs short: I want to read a file and get the overview without re-reading every detail. The details belong in `doc/uc1-create-booking/` only.
+- `doc/plan.md` is our handoff between sessions: the next step, decisions with a one-line why, and "Docs to sync". "Note it down" means write it there. Remove done steps and keep the numbers of the remaining ones.
+- When a change makes a doc wrong, fix the doc in the same pass, or add it to "Docs to sync" if I limited the scope.
 - Docs in `doc/` are my working notes and may be rough, partly in Vietnamese, or behind the code. Check them against the code, and tell me when they disagree.
 
 ## Project overview
@@ -21,8 +36,8 @@ A simple hotel booking system, built as Go microservices with **hexagonal archit
 | `room-service` | Room CRUD done; inventory WIP | PostgreSQL (+ Redis lock later) | Rooms, monthly inventory (JSONB days), reservations |
 | `booking-service` | WIP: model/repo/service, handler partial, `main.go` stub | PostgreSQL | Booking stores user and room **snapshots** plus nightly rates |
 | `orchestrator-service` | Skeleton only | PostgreSQL | `saga_instances` + `saga_message_log` schemas designed |
-| `payment-service` | Empty | PostgreSQL + Stripe sandbox | |
-| `notification-service` | Empty | MongoDB + AWS SES | |
+| `payment-service` | Skeleton only (config done) | PostgreSQL + Stripe sandbox | |
+| `notification-service` | Skeleton only | MongoDB + AWS SES | |
 
 Key docs:
 - `doc/services.md`: service responsibilities, endpoints, tech stack
@@ -61,7 +76,7 @@ Rules:
 - The core (`internal/<domain>`) must not import adapters, infra libraries like gin or pgx, **or `booking/contracts`**. Adapters map proto / Kafka messages to domain types, the same way handlers map DTOs. Ports are interfaces defined in the core.
 - No publisher port: the repository writes the state change + outbox row in one tx, and the platform poller publishes.
 - Handlers map DTOs to domain models (`dto.go`, `ToXxx()` methods). They call services, never repositories.
-- A service may have more than one domain package, e.g. room-service has `room/` and `inventory/`.
+- A service may have more than one domain package, but only when they don't need each other: room-service keeps rooms, inventories and reservations in one `room/` package, because they depend on each other both ways and Go forbids import cycles.
 
 ## Conventions (follow existing code)
 
@@ -75,7 +90,7 @@ Rules:
 - One name per field everywhere (REST, gRPC, Kafka, DB), `snake_case` in JSON. Flat structures prefix the owner (`user_phone_number`, `check_in_date`); nested objects drop it (`user.phone_number`, not `user.phone` or `user.user_phone_number`).
 - Status enums are Go `type X string` constants with `IsValid()`, mirrored by Postgres `ENUM` types.
 - Errors are wrapped with context: `fmt.Errorf("failed to ...: %w", err)`.
-- Config comes from env: `SERVER_PORT`, `DB_HOST/PORT/USER/PASSWORD/NAME`, `KAFKA_BROKERS` (comma-separated). `.env.example` is only a template, so identical values across services (like the port) are intentional. The real `.env` is gitignored, local only, and I set it up myself for each service.
+- Config comes from env: `SERVER_PORT`, `GRPC_PORT` (services with a gRPC server), `DB_HOST/PORT/USER/PASSWORD/NAME`, `KAFKA_BROKERS` (comma-separated). `.env.example` is only a template, so identical values across services (like the port) are intentional. The real `.env` is gitignored, local only, and I set it up myself for each service.
 - `main.go` exits with `slog.Error` + `os.Exit(1)` when `config.Load()` or DB init fails.
 - Commit messages look like `[scope] message`, e.g. `[booking svc] http handler and router` or `[UC: create booking] init`.
 
@@ -90,6 +105,12 @@ go test ./...           # no tests yet
 go mod tidy
 ```
 Infra: `infra/postgresql/docker-compose.yml` currently defines only `postgres-booking` (host port 5440). `infra/kafka` and `infra/mongodb` are empty placeholders. Migrations in `db/migration/` are applied by hand.
+
+My setup:
+- Windows + PowerShell: commands you give me must run there.
+- I run the services and test with Postman / grpcurl myself. Don't run anything against my database.
+- Local DBs are throwaway in phase 1: change the `CREATE` file and rebuild (room-service has `drop_all.sql`). No `ALTER` migrations.
+- `.gitattributes` forces LF, so `gofmt -l .` from the repo root should print nothing. Anything it lists is a real formatting problem.
 
 ## Roadmap
 

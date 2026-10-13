@@ -59,19 +59,30 @@ Logging IN rows for audit is G8.
 
 ## Room
 
+Done in `room-service/db/migration/create_reservations_table.sql`. The migrations are full `CREATE`s, so the local DB is re-built with `drop_all.sql` + the `create_*.sql` files (rooms, inventories, reservations), not altered.
+
 ```sql
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
-ALTER TABLE reservations
-    ADD COLUMN saga_id UUID NOT NULL UNIQUE,
-    ADD CONSTRAINT reservations_no_overlap
-        EXCLUDE USING gist (room_id WITH =, daterange(check_in_date, check_out_date) WITH &&)
-        WHERE ("status" IN ('RESERVED', 'CONFIRMED'));
+-- new in CREATE TABLE reservations
+saga_id        UUID NOT NULL UNIQUE,
+total_amount   BIGINT NOT NULL,     -- snapshot, minor units
+currency       CHAR(3) NOT NULL,    -- snapshot
+nightly_rates  JSONB NOT NULL,      -- snapshot, [{date, price}]
+CONSTRAINT reservations_no_overlap
+    EXCLUDE USING gist (room_id WITH =, daterange(check_in_date, check_out_date, '[)') WITH &&)
+    WHERE ("status" IN ('RESERVED', 'CONFIRMED')),
+CONSTRAINT check_dates CHECK (check_in_date < check_out_date)
 ```
 
 - `daterange` is `[check_in_date, check_out_date)`, so the check-out day is free for the next guest.
-- An overlap fails with SQLSTATE `23P01`, which the repository maps to `ErrRoomUnavailable`, which becomes gRPC `FAILED_PRECONDITION`.
-- `reservation_status` enum: v1 uses `RESERVED`, `CONFIRMED`, `RELEASED` (`EXPIRED` stays unused until G6).
+- `check_dates`: a zero-night stay is an empty range. It overlaps nothing, so it would pass the exclusion constraint.
+- An overlap fails with SQLSTATE `23P01`, which the repository maps to `ErrRoomUnavailable`, which becomes gRPC `FAILED_PRECONDITION`. There is no "check, then insert": the insert is the check.
+- Price snapshot (`total_amount`, `currency`, `nightly_rates`): written once at reserve time from the inventory prices, and returned as stored when ReserveRoom is called again with the same `saga_id`. No `DEFAULT`, so a forgotten value is an error.
+- The primary key is `id`, like `rooms` / `bookings` / `users`. It is still called `reservation_id` in gRPC, Kafka and other tables.
+- No extra indexes: v1 looks rows up by `saga_id` (`UNIQUE`), and the constraint's GiST index does the overlap check. An `expires_at` index belongs to the G6 sweeper.
+- `reservation_status` enum: v1 uses `RESERVED`, `CONFIRMED`, `RELEASED` (`EXPIRED` is not in the enum; G6 adds it with `ALTER TYPE ... ADD VALUE`).
+- `inventories.currency` is `CHAR(3)`, like every other currency column.
 - `inventories.days` JSONB: each day becomes `{ "status": "AVAILABLE" | "MAINTENANCE", "price": 12000 }`. Remove `RESERVED` / `BOOKED` / `booking_id`, because occupancy lives only in `reservations`. `currency` stays a column on the row (one currency per room-month), not repeated on every day.
 - Creating a room also creates `inventories` for the current month + next 11 (all days `AVAILABLE`), in the same transaction as the room insert.
 

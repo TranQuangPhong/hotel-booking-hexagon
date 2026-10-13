@@ -1,4 +1,4 @@
-package inventory
+package room
 
 import "time"
 
@@ -39,21 +39,21 @@ func (r Rate) IsValid() bool {
 type DayStatus string
 
 const (
-	StatusAvailable   DayStatus = "AVAILABLE"
-	StatusMaintenance DayStatus = "MAINTENANCE"
+	DayAvailable   DayStatus = "AVAILABLE"
+	DayMaintenance DayStatus = "MAINTENANCE"
 )
 
 func (s DayStatus) IsValid() bool {
 	switch s {
-	case StatusAvailable, StatusMaintenance:
+	case DayAvailable, DayMaintenance:
 		return true
 	}
 	return false
 }
 
-// NewMonths builds inventories for `months` consecutive months, starting at the month of `from` (UTC).
+// NewInventories builds inventories for `months` consecutive months, starting at the month of `from` (UTC).
 // Every day is AVAILABLE at `rate`. RoomID is left empty: the caller sets it once the room exists.
-func NewMonths(from time.Time, months int, rate Rate) []*Inventory {
+func NewInventories(from time.Time, months int, rate Rate) []*Inventory {
 	from = from.UTC()
 	// Normalize to the 1st: AddDate on day 29-31 overflows (Oct 31 + 1 month = Dec 1, November skipped)
 	start := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC)
@@ -66,7 +66,7 @@ func NewMonths(from time.Time, months int, rate Rate) []*Inventory {
 
 		days := make(map[int8]Day, daysInMonth)
 		for d := 1; d <= daysInMonth; d++ {
-			days[int8(d)] = Day{Status: StatusAvailable, Price: rate.Price}
+			days[int8(d)] = Day{Status: DayAvailable, Price: rate.Price}
 		}
 		inventories = append(inventories, &Inventory{
 			Year:     int16(year),

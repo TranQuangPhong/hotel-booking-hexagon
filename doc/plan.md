@@ -13,33 +13,22 @@ Done
 - UC1 detailed design: doc/uc1-create-booking/ (v1 lean, decisions Q1-Q4 confirmed)
 - Refactor: folder structure, naming, contracts/ + platform/ modules scaffolded
 - contracts/: envelope, messages, room / booking / payment proto + buf generated code
+- M1 steps 1-3: contracts wired into room-service, reservations migration (exclusion constraint, price snapshot) + drop_all.sql,
+  internal/inventory merged into internal/room
 
 UC1 build order (details: doc/uc1-create-booking/README.md section 6)
-- M1: contracts/ (done) + Room ReserveRoom gRPC + exclusion constraint   <- NEXT
+- M1: Room ReserveRoom gRPC   <- NOW
 - M2: Booking CreateBooking gRPC (idempotent by saga_id)
 - M3: Orchestrator phase A: POST /bookings -> ReserveRoom -> CreateBooking (no Kafka yet)
 - M4: Kafka + outbox poller + phase D (deadline worker -> ReleaseRoom -> ExpireBooking)
 - M5: Payment: CreateCheckoutSession (Stripe hosted page) + Stripe webhook -> PaymentAuthorized
 - M6: Phase C (confirm room -> capture -> confirm booking) + notification consumer
 
-Next step: M1, Room ReserveRoom gRPC   <- resume at step 1
+Next step: M1, Room ReserveRoom gRPC   <- resume at step 4 (steps 1-3 done)
 Not in M1: the orchestrator gRPC client (that is M3). Test with grpcurl
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
+Before step 4: re-build the room DB (drop_all.sql, then create rooms / inventories / reservations) and re-run the Postman room CRUD
 
-1. Wire contracts into room-service: require booking/contracts + replace => ../contracts, go build ./...
-    + leftover: envelope round-trip test in contracts/envelope
-2. Migration (create_resevations_table.sql)
-    + CREATE EXTENSION IF NOT EXISTS btree_gist
-    + saga_id UUID NOT NULL UNIQUE
-    + EXCLUDE USING gist (room_id WITH =, daterange(check_in_date, check_out_date) WITH &&)
-      WHERE status IN (RESERVED, CONFIRMED) -> an overlap on the same room fails with SQLSTATE 23P01
-    + CHECK (check_out_date > check_in_date): a zero-night stay is an empty range, it overlaps nothing and would pass the constraint
-    + price snapshot: total_amount BIGINT, currency CHAR(3), nightly_rates JSONB ([{date, price}], write-once)
-3. Merge internal/inventory into internal/room (before writing Reserve)
-    + one package, one Service, one Repository port
-    + files: room.go, inventory.go, reservation.go, errors.go, repository.go, service.go
-    + watch name collisions: 3 status types (room, day, reservation), one ErrInvalidInput
-    + check: go build ./... and the Postman room CRUD still pass
 4. Core (internal/room)
     + reservation.go: Reservation (with the price snapshot) + status RESERVED / CONFIRMED / RELEASED with IsValid()
     + errors.go: ErrInvalidInput, ErrNotFound, ErrReservationReleased,
@@ -85,8 +74,6 @@ Work split: I write the main gRPC logic by hand; Claude handles the subtle detai
     + a zero-night stay and a past check-in fail with INVALID_ARGUMENT
 
 Why (decided 2026-10-12)
-- Merge room + inventory: they depend on each other both ways (room create writes inventories in one tx; Reserve needs
-  the room's status, number, type) and Go forbids import cycles. Split again when a part gets a life of its own
 - Price snapshot on the reservation: an admin will be able to change inventory prices, so a repeated call must return what was
   first quoted, not re-read inventory. JSONB because it is write-once and never queried by night
 - Reserve reads the room: the response carries room_number + room_type, and an INACTIVE / ARCHIVED room still has AVAILABLE days
@@ -101,24 +88,18 @@ Notes for later milestones
     + unknown outcome (timeout, UNAVAILABLE, INTERNAL) -> phase D, reply 503
 - M3: saga_instances migration is behind data-model.md: add deadline_at (= ReserveRoom expires_at) + user_id + idx_saga_deadline,
   reservation_id TEXT -> UUID
-- M4: contracts room/v1 RoomReleased.ReservationID string -> *string (null when nothing was released)
 - E6 (accepted in v1): ReserveRoom commits after ReleaseRoom already found "no row" -> a hold that nobody releases
   (the saga is FAILED, no sweeper). Mitigation: the request ctx on every query (step 5)
 - Later phases: extend the inventory horizon (a room gets 12 months at creation, nothing adds more)
 
 Cleanup (any time)
-- reservations migration: the EXPIRED enum value + both indexes are unused in v1 (they serve the G6 sweeper)
-- inventories migration: currency VARCHAR(3) -> CHAR(3)
+- contracts/envelope: round-trip test (skipped in step 1, do it once the real gRPC call works)
 - handler.go: GetRoomByID returns 404 for every error, UpdateRoom returns 500 for a missing room -> use ErrNotFound
 
 Docs to sync
-- CLAUDE.md, hexagonal-structure.md: room-service has one domain package; Reserve = one tx with FOR SHARE reads;
-  GRPC_PORT in the config list
-- contracts.md: ReserveRoom errors + INVALID_ARGUMENT, RESERVATION_RELEASED
-- data-model.md: reservations price snapshot + CHECK (check_out_date > check_in_date)
+- CLAUDE.md, hexagonal-structure.md: Reserve = one tx with FOR SHARE reads
 - flows.md, state-machines.md, README timers: room status + date validation in ReserveRoom; ReserveRoom is idempotent by saga_id
-  (a repeated call returns the stored row);
-  the M3 "error -> saga" rule above
+  (a repeated call returns the stored row)
 - good-to-have.md: add E6 and the inventory horizon; E4 becomes "not checked in v1"
 - use-cases.md line 35: "Update inventory" is stale (occupancy lives only in reservations)
 

@@ -10,7 +10,7 @@ Owned by the orchestrator (`saga_instances`).
 stateDiagram-v2
     [*] --> RESERVING_ROOM: POST /bookings
     RESERVING_ROOM --> CREATING_BOOKING: room reserved
-    RESERVING_ROOM --> FAILED: ROOM_UNAVAILABLE
+    RESERVING_ROOM --> FAILED: ReserveRoom rejected
     CREATING_BOOKING --> AWAITING_PAYMENT: booking created
 
     AWAITING_PAYMENT --> CONFIRMING_ROOM: PaymentAuthorized
@@ -19,7 +19,7 @@ stateDiagram-v2
     CAPTURING_PAYMENT --> FAILED: PaymentCaptureFailed (manual fix)
     CONFIRMING_BOOKING --> COMPLETED: BookingConfirmed
 
-    RESERVING_ROOM --> RELEASING_ROOM: gRPC error / deadline
+    RESERVING_ROOM --> RELEASING_ROOM: unknown gRPC outcome / deadline
     CREATING_BOOKING --> RELEASING_ROOM: gRPC error / deadline
     AWAITING_PAYMENT --> RELEASING_ROOM: deadline
     RELEASING_ROOM --> EXPIRING_BOOKING: RoomReleased
@@ -41,9 +41,10 @@ stateDiagram-v2
 |---|---|---|---|
 | — | `POST /bookings` | insert saga, `deadline_at` | `RESERVING_ROOM` → call ReserveRoom |
 | `RESERVING_ROOM` | ok | save reservation + prices | `CREATING_BOOKING` → call CreateBooking |
-| `RESERVING_ROOM` | `ROOM_UNAVAILABLE` | — | **FAILED** |
+| `RESERVING_ROOM` | rejected: `NOT_FOUND`, `INVALID_ARGUMENT`, `FAILED_PRECONDITION` (nothing was held) | — | **FAILED** |
+| `RESERVING_ROOM` | any other gRPC error (timeout, `UNAVAILABLE`, `INTERNAL`): outcome unknown | outbox `ReleaseRoom` | `RELEASING_ROOM` |
 | `CREATING_BOOKING` | ok | save bookingId | `AWAITING_PAYMENT` |
-| `RESERVING_ROOM`, `CREATING_BOOKING` | other gRPC error | outbox `ReleaseRoom` | `RELEASING_ROOM` |
+| `CREATING_BOOKING` | any gRPC error (the room is held) | outbox `ReleaseRoom` | `RELEASING_ROOM` |
 | `RESERVING_ROOM`, `CREATING_BOOKING`, `AWAITING_PAYMENT` | deadline worker | outbox `ReleaseRoom` | `RELEASING_ROOM` |
 | `AWAITING_PAYMENT` | `POST …/payment` | call CreateCheckoutSession, save paymentId (gRPC error: reply `503` / `409`, save nothing) | *(same)* |
 | `AWAITING_PAYMENT` | `PaymentAuthorized` | outbox `ConfirmReservation` | `CONFIRMING_ROOM` |

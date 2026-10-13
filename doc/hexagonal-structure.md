@@ -10,9 +10,11 @@ hotel-booking-hexagon/
 ├── contracts/                    # module booking/contracts: DEFINITIONS ONLY (no pgx, kafka, gin)
 │   ├── go.mod
 │   ├── buf.yaml, buf.gen.yaml    # protobuf generation config
+│   ├── Makefile                  # `make`: buf format + lint + generate, then go mod tidy
 │   ├── envelope/
 │   │   └── envelope.go           # Kafka envelope: message_id, type, saga_id, producer, occurred_at, data
 │   ├── room/v1/                  # owned by room-service
+│   │   ├── doc.go                # package comment
 │   │   ├── room.proto            # gRPC: ReserveRoom
 │   │   ├── room.pb.go, room_grpc.pb.go   # generated, never edit by hand
 │   │   └── messages.go           # commands room accepts + events room emits (data structs, type names, topics)
@@ -114,35 +116,30 @@ orchestrator-service/
 ```
 room-service/
 ├── cmd/main.go                       # wire + start: REST, gRPC, Kafka consumer, outbox poller
-├── config/config.go
+├── config/config.go                  # UC1: + GRPC_PORT
 ├── internal/
-│   ├── room/                         ===== CORE: room catalog (CRUD, done) =====
-│   │   ├── room.go
-│   │   ├── repository.go             # port
-│   │   └── service.go
-│   │
-│   ├── inventory/                    ===== CORE: prices + holds =====
-│   │   ├── inventory.go              # Inventory (currency per row) + Day {status AVAILABLE|MAINTENANCE, price}; NewMonths builder
+│   ├── room/                         ===== CORE: rooms (CRUD, done) + prices + holds, one package =====
+│   │   ├── room.go                   # Room + status / type enums
+│   │   ├── inventory.go              # Inventory (currency per row) + Day {status AVAILABLE|MAINTENANCE, price}; NewInventories builder
 │   │   ├── reservation.go            # UC1: Reservation entity + status enum
-│   │   ├── repository.go             # port (+ UC1: CreateReservation, Confirm, Release by sagaID)
-│   │   ├── service.go                # UC1: ReserveRoom, ConfirmReservation, ReleaseRoom
-│   │   └── errors.go                 # UC1: ErrRoomUnavailable, ...
+│   │   ├── errors.go                 # ErrInvalidInput (+ UC1: ErrRoomUnavailable, ...)
+│   │   ├── repository.go             # port: rooms + inventories (+ UC1: reservations by sagaID)
+│   │   └── service.go                # room CRUD (+ UC1: Reserve, ConfirmReservation, ReleaseRoom)
 │   │
 │   └── adapter/
 │       ├── handler/                  # REST /rooms/api/v1 (CRUD)
 │       ├── grpc/
 │       │   └── server.go             # UC1: ReserveRoom
 │       ├── kafka/
-│       │   ├── consumer.go           # UC1: room.commands -> inventory service
+│       │   ├── consumer.go           # UC1: room.commands -> room service
 │       │   └── mapper.go
 │       └── postgres/
-│           ├── room_repository.go
-│           └── inventory_repository.go   # UC1: reservations (23P01 -> ErrRoomUnavailable) + outbox
+│           └── room_repository.go    # rooms + inventories (+ UC1: reservations (23P01 -> ErrRoomUnavailable) + outbox)
 ├── db/migration/
 └── go.mod
 ```
 
-Reservations live in `inventory/` rather than a third package, because `ReserveRoom` reads prices and writes the hold in one transaction.
+Rooms, inventories and reservations share one package because they depend on each other both ways: creating a room writes its inventories in one transaction, and `ReserveRoom` reads the room and its prices and writes the hold in one transaction. Go forbids import cycles, so two packages would not compile. Split again when a part gets a life of its own.
 Redis lock / `cached_room_repository.go` decorator: roadmap phase 5, not needed for correctness.
 
 ### booking-service
@@ -150,7 +147,7 @@ Redis lock / `cached_room_repository.go` decorator: roadmap phase 5, not needed 
 ```
 booking-service/
 ├── cmd/main.go                       # wire + start: REST (GET), gRPC, Kafka consumer, outbox poller
-├── config/config.go
+├── config/config.go                  # UC1: + GRPC_PORT
 ├── internal/
 │   ├── booking/                      ===== CORE =====
 │   │   ├── booking.go                # Booking, statuses (PENDING, BOOKED, EXPIRED, …)
@@ -172,7 +169,7 @@ booking-service/
 ```
 payment-service/
 ├── cmd/main.go                       # wire + start: gRPC, webhook REST, Kafka consumer, outbox poller
-├── config/config.go                  # + STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_SUCCESS_URL
+├── config/config.go                  # + GRPC_PORT, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_SUCCESS_URL
 ├── internal/
 │   ├── payment/                      ===== CORE =====
 │   │   ├── payment.go                # Payment, status enum (CREATED, AUTHORIZED, CAPTURED, CAPTURE_FAILED)

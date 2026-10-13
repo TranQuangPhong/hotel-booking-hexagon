@@ -26,6 +26,13 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type PaymentServiceClient interface {
+	// CreateCheckoutSession creates a Stripe Checkout Session (hosted page, manual capture)
+	// and the payment record. A repeated call with the same saga_id returns the same URL
+	// while the session is open.
+	//
+	// Errors:
+	//   - UNAVAILABLE: the Stripe call failed
+	//   - FAILED_PRECONDITION: the session is no longer open (for example, already paid)
 	CreateCheckoutSession(ctx context.Context, in *CreateCheckoutSessionRequest, opts ...grpc.CallOption) (*CreateCheckoutSessionResponse, error)
 }
 
@@ -51,6 +58,13 @@ func (c *paymentServiceClient) CreateCheckoutSession(ctx context.Context, in *Cr
 // All implementations must embed UnimplementedPaymentServiceServer
 // for forward compatibility.
 type PaymentServiceServer interface {
+	// CreateCheckoutSession creates a Stripe Checkout Session (hosted page, manual capture)
+	// and the payment record. A repeated call with the same saga_id returns the same URL
+	// while the session is open.
+	//
+	// Errors:
+	//   - UNAVAILABLE: the Stripe call failed
+	//   - FAILED_PRECONDITION: the session is no longer open (for example, already paid)
 	CreateCheckoutSession(context.Context, *CreateCheckoutSessionRequest) (*CreateCheckoutSessionResponse, error)
 	mustEmbedUnimplementedPaymentServiceServer()
 }

@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"booking/room-service/internal/inventory"
 	"booking/room-service/internal/room"
 	"context"
 	"fmt"
@@ -57,7 +56,7 @@ func (r *RoomRepository) Update(ctx context.Context, room *room.Room) (*room.Roo
 }
 
 // Create room & inventory for next 1 year
-func (r *RoomRepository) Create(ctx context.Context, room *room.Room, inventories []*inventory.Inventory) (*room.Room, error) {
+func (r *RoomRepository) Create(ctx context.Context, room *room.Room, inventories []*room.Inventory) (*room.Room, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)

@@ -2,6 +2,8 @@ module booking/room-service
 
 go 1.25.5
 
+require booking/contracts v0.0.0
+
 require (
 	github.com/TranQuangPhong/hotel-booking-logger v1.0.0
 	github.com/gin-gonic/gin v1.12.0
@@ -43,5 +45,12 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
+	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
+)
+
+replace (
+	booking/contracts => ../contracts
+	booking/platform => ../platform
 )

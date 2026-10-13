@@ -28,7 +28,7 @@ type ReserveRoomRequest struct {
 	RoomId        string                 `protobuf:"bytes,2,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
 	CheckInDate   string                 `protobuf:"bytes,3,opt,name=check_in_date,json=checkInDate,proto3" json:"check_in_date,omitempty"`    // YYYY-MM-DD
 	CheckOutDate  string                 `protobuf:"bytes,4,opt,name=check_out_date,json=checkOutDate,proto3" json:"check_out_date,omitempty"` // YYYY-MM-DD, exclusive
-	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`            // hold deadline, set by the caller (the saga's deadline_at)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -184,8 +184,8 @@ func (x *ReserveRoomResponse) GetNightlyRates() []*NightlyRate {
 
 type NightlyRate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Date          string                 `protobuf:"bytes,1,opt,name=date,proto3" json:"date,omitempty"`
-	Price         int64                  `protobuf:"varint,2,opt,name=price,proto3" json:"price,omitempty"`
+	Date          string                 `protobuf:"bytes,1,opt,name=date,proto3" json:"date,omitempty"`    // YYYY-MM-DD
+	Price         int64                  `protobuf:"varint,2,opt,name=price,proto3" json:"price,omitempty"` // minor units
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

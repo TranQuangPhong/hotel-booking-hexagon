@@ -1,0 +1,3 @@
+# Store and check out every text file with LF, whatever core.autocrlf says on the machine.
+# text=auto lets Git detect binary files and leave them alone.
+* text=auto eol=lf

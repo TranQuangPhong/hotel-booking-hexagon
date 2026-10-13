@@ -4,18 +4,25 @@ package payment.v1;
 
 option go_package = "booking/contracts/payment/v1;paymentv1";
 
-message CreateCheckoutSessionRequest{
-    string saga_id = 1;
-    string booking_id = 2;
-    int64 amount = 3; //minor units
-    string currency = 4;
+message CreateCheckoutSessionRequest {
+  string saga_id = 1;
+  string booking_id = 2;
+  int64 amount = 3; // minor units
+  string currency = 4;
 }
 
-message CreateCheckoutSessionResponse{
-    string payment_id = 1;
-    string checkout_url = 2; //Stripe hosted payment page, the client is redirected to it
+message CreateCheckoutSessionResponse {
+  string payment_id = 1;
+  string checkout_url = 2; // Stripe hosted payment page, the client is redirected to it
 }
 
 service PaymentService {
-    rpc CreateCheckoutSession(CreateCheckoutSessionRequest) returns (CreateCheckoutSessionResponse);
+  // CreateCheckoutSession creates a Stripe Checkout Session (hosted page, manual capture)
+  // and the payment record. A repeated call with the same saga_id returns the same URL
+  // while the session is open.
+  //
+  // Errors:
+  //   - UNAVAILABLE: the Stripe call failed
+  //   - FAILED_PRECONDITION: the session is no longer open (for example, already paid)
+  rpc CreateCheckoutSession(CreateCheckoutSessionRequest) returns (CreateCheckoutSessionResponse);
 }

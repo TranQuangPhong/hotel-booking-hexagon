@@ -1,7 +1,6 @@
 package room
 
 import (
-	"booking/room-service/internal/inventory"
 	"context"
 	"fmt"
 	"time"
@@ -35,7 +34,7 @@ func (s *Service) GetByID(ctx context.Context, id string) (*Room, error) {
 }
 
 // Create room & inventory for next 1 year, every day priced at `rate`
-func (s *Service) Create(ctx context.Context, room *Room, rate inventory.Rate) (*Room, error) {
+func (s *Service) Create(ctx context.Context, room *Room, rate Rate) (*Room, error) {
 	if !room.Type.IsValid() {
 		return nil, fmt.Errorf("%w: room type %q", ErrInvalidInput, room.Type)
 	}
@@ -46,7 +45,7 @@ func (s *Service) Create(ctx context.Context, room *Room, rate inventory.Rate) (
 		return nil, fmt.Errorf("%w: rate must have price > 0 and a 3-letter uppercase currency", ErrInvalidInput)
 	}
 
-	inventories := inventory.NewMonths(time.Now(), inventoryMonths, rate)
+	inventories := NewInventories(time.Now(), inventoryMonths, rate)
 
 	newRoom, err := s.repository.Create(ctx, room, inventories)
 	if err != nil {

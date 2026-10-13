@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"booking/room-service/internal/inventory"
 	"booking/room-service/internal/room"
 	"strings"
 )
@@ -15,8 +14,8 @@ type CreateRoomRequest struct {
 }
 
 // ToRate is the initial nightly rate for the room's inventory
-func (req *CreateRoomRequest) ToRate() inventory.Rate {
-	return inventory.Rate{
+func (req *CreateRoomRequest) ToRate() room.Rate {
+	return room.Rate{
 		Price:    req.Price,
 		Currency: strings.ToUpper(req.Currency),
 	}

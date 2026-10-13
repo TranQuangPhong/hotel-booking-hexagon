@@ -7,24 +7,25 @@ import "google/protobuf/timestamp.proto";
 option go_package = "booking/contracts/booking/v1;bookingv1";
 
 message CreateBookingRequest {
-    string saga_id = 1;
-    string reservation_id = 2;
-    User user = 3;
-    Room room = 4;
-    string check_in_date = 5; //YYYY-MM-DD
-    string check_out_date = 6; //YYYY-MM-DD, exclusive
-    int32 number_of_guests = 7;
-    int64 total_amount = 8; //minor units
-    string currency = 9;
-    repeated NightlyRate nightly_rates = 10;
-    google.protobuf.Timestamp expires_at = 11;
+  string saga_id = 1;
+  string reservation_id = 2;
+  User user = 3;
+  Room room = 4;
+  string check_in_date = 5; // YYYY-MM-DD
+  string check_out_date = 6; // YYYY-MM-DD, exclusive
+  int32 number_of_guests = 7;
+  int64 total_amount = 8; // minor units
+  string currency = 9;
+  repeated NightlyRate nightly_rates = 10;
+  google.protobuf.Timestamp expires_at = 11;
 }
 
 message CreateBookingResponse {
-    string booking_id = 1;
-    string status = 2;
+  string booking_id = 1;
+  string status = 2; // booking status, PENDING for a new booking
 }
 
+// User snapshot stored on the booking
 message User {
   string id = 1;
   string name = 2;
@@ -32,6 +33,7 @@ message User {
   string phone_number = 4;
 }
 
+// Room snapshot stored on the booking
 message Room {
   string id = 1;
   string number = 2;
@@ -39,10 +41,15 @@ message Room {
 }
 
 message NightlyRate {
-  string date = 1;
-  int64 price = 2;
+  string date = 1; // YYYY-MM-DD
+  int64 price = 2; // minor units
 }
 
 service BookingService {
-    rpc CreateBooking(CreateBookingRequest) returns (CreateBookingResponse);
+  // CreateBooking creates a PENDING booking with the user and room snapshots and the nightly rates.
+  // Idempotent by saga_id: a repeated call returns the existing booking.
+  //
+  // Errors:
+  //   - INVALID_ARGUMENT
+  rpc CreateBooking(CreateBookingRequest) returns (CreateBookingResponse);
 }

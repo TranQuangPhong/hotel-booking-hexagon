@@ -9,9 +9,9 @@ option go_package = "booking/contracts/room/v1;roomv1";
 message ReserveRoomRequest {
   string saga_id = 1;
   string room_id = 2;
-  string check_in_date = 3;                  // YYYY-MM-DD
-  string check_out_date = 4;                 // YYYY-MM-DD, exclusive
-  google.protobuf.Timestamp expires_at = 5;
+  string check_in_date = 3; // YYYY-MM-DD
+  string check_out_date = 4; // YYYY-MM-DD, exclusive
+  google.protobuf.Timestamp expires_at = 5; // hold deadline, set by the caller (the saga's deadline_at)
 }
 
 message ReserveRoomResponse {
@@ -19,15 +19,23 @@ message ReserveRoomResponse {
   string room_number = 2;
   string room_type = 3;
   string currency = 4;
-  int64 total_amount = 5;                    // minor units
+  int64 total_amount = 5; // minor units
   repeated NightlyRate nightly_rates = 6;
 }
 
 message NightlyRate {
-  string date = 1;
-  int64 price = 2;
+  string date = 1; // YYYY-MM-DD
+  int64 price = 2; // minor units
 }
 
 service RoomService {
+  // ReserveRoom holds a room for the stay and returns the price snapshot.
+  // Idempotent by saga_id: a repeated call returns the stored reservation and prices.
+  //
+  // Errors:
+  //   - INVALID_ARGUMENT: bad ID or date, zero-night stay, check-in in the past
+  //   - NOT_FOUND: the room does not exist
+  //   - FAILED_PRECONDITION "ROOM_UNAVAILABLE": overlapping hold, MAINTENANCE night, no inventory, room not ACTIVE
+  //   - FAILED_PRECONDITION "RESERVATION_RELEASED": this saga_id's reservation was already released
   rpc ReserveRoom(ReserveRoomRequest) returns (ReserveRoomResponse);
 }

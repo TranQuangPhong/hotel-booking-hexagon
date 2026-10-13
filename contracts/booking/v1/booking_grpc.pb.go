@@ -26,6 +26,11 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type BookingServiceClient interface {
+	// CreateBooking creates a PENDING booking with the user and room snapshots and the nightly rates.
+	// Idempotent by saga_id: a repeated call returns the existing booking.
+	//
+	// Errors:
+	//   - INVALID_ARGUMENT
 	CreateBooking(ctx context.Context, in *CreateBookingRequest, opts ...grpc.CallOption) (*CreateBookingResponse, error)
 }
 
@@ -51,6 +56,11 @@ func (c *bookingServiceClient) CreateBooking(ctx context.Context, in *CreateBook
 // All implementations must embed UnimplementedBookingServiceServer
 // for forward compatibility.
 type BookingServiceServer interface {
+	// CreateBooking creates a PENDING booking with the user and room snapshots and the nightly rates.
+	// Idempotent by saga_id: a repeated call returns the existing booking.
+	//
+	// Errors:
+	//   - INVALID_ARGUMENT
 	CreateBooking(context.Context, *CreateBookingRequest) (*CreateBookingResponse, error)
 	mustEmbedUnimplementedBookingServiceServer()
 }

@@ -34,8 +34,14 @@ sequenceDiagram
         Note over O: save bookingId, step AWAITING_PAYMENT
         O-->>C: 201 bookingId, PENDING, total, currency, expiresAt
     end
-    Note over O,B: any other gRPC error (timeout, 5xx) in steps 3 or 6:<br/>tx: COMPENSATING / RELEASING_ROOM + outbox ReleaseRoom, reply 503, continue in phase D
+    Note over O,B: unknown outcome in step 2 (timeout, UNAVAILABLE, INTERNAL) or any gRPC error in step 6:<br/>tx: COMPENSATING / RELEASING_ROOM + outbox ReleaseRoom, reply 503, continue in phase D
 ```
+
+`ReserveRoom` errors come in two kinds:
+- **Definite rejection** (`NOT_FOUND`, `INVALID_ARGUMENT`, `FAILED_PRECONDITION`): nothing was held, so the saga goes to `FAILED` and the client gets `404` / `400` / `409`. The diagram shows `ROOM_UNAVAILABLE` as the example.
+- **Unknown outcome** (timeout, `UNAVAILABLE`, `INTERNAL`): a hold may exist, so the saga goes to phase D and the client gets `503`.
+
+Any `CreateBooking` error goes to phase D, because the room is already held.
 
 Each `Note` over O is its own short transaction, and no transaction stays open during a gRPC call. If the orchestrator crashes mid-phase, the saga keeps its `deadline_at`, so the **deadline worker** releases whatever was held (phase D).
 

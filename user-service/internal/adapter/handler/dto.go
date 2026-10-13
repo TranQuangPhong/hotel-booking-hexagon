@@ -24,7 +24,7 @@ type UpdateUserRequest struct {
 
 func (req *UpdateUserRequest) ToUser(id string) *user.User {
 	return &user.User{
-		ID: id,
+		ID:    id,
 		Name:  req.Name,
 		Email: req.Email,
 		Role:  user.Role(req.Role),

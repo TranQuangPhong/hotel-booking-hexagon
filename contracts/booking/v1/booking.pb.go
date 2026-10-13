@@ -28,10 +28,10 @@ type CreateBookingRequest struct {
 	ReservationId  string                 `protobuf:"bytes,2,opt,name=reservation_id,json=reservationId,proto3" json:"reservation_id,omitempty"`
 	User           *User                  `protobuf:"bytes,3,opt,name=user,proto3" json:"user,omitempty"`
 	Room           *Room                  `protobuf:"bytes,4,opt,name=room,proto3" json:"room,omitempty"`
-	CheckInDate    string                 `protobuf:"bytes,5,opt,name=check_in_date,json=checkInDate,proto3" json:"check_in_date,omitempty"`    //YYYY-MM-DD
-	CheckOutDate   string                 `protobuf:"bytes,6,opt,name=check_out_date,json=checkOutDate,proto3" json:"check_out_date,omitempty"` //YYYY-MM-DD, exclusive
+	CheckInDate    string                 `protobuf:"bytes,5,opt,name=check_in_date,json=checkInDate,proto3" json:"check_in_date,omitempty"`    // YYYY-MM-DD
+	CheckOutDate   string                 `protobuf:"bytes,6,opt,name=check_out_date,json=checkOutDate,proto3" json:"check_out_date,omitempty"` // YYYY-MM-DD, exclusive
 	NumberOfGuests int32                  `protobuf:"varint,7,opt,name=number_of_guests,json=numberOfGuests,proto3" json:"number_of_guests,omitempty"`
-	TotalAmount    int64                  `protobuf:"varint,8,opt,name=total_amount,json=totalAmount,proto3" json:"total_amount,omitempty"` //minor units
+	TotalAmount    int64                  `protobuf:"varint,8,opt,name=total_amount,json=totalAmount,proto3" json:"total_amount,omitempty"` // minor units
 	Currency       string                 `protobuf:"bytes,9,opt,name=currency,proto3" json:"currency,omitempty"`
 	NightlyRates   []*NightlyRate         `protobuf:"bytes,10,rep,name=nightly_rates,json=nightlyRates,proto3" json:"nightly_rates,omitempty"`
 	ExpiresAt      *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
@@ -149,7 +149,7 @@ func (x *CreateBookingRequest) GetExpiresAt() *timestamppb.Timestamp {
 type CreateBookingResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	BookingId     string                 `protobuf:"bytes,1,opt,name=booking_id,json=bookingId,proto3" json:"booking_id,omitempty"`
-	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
+	Status        string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"` // booking status, PENDING for a new booking
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -198,6 +198,7 @@ func (x *CreateBookingResponse) GetStatus() string {
 	return ""
 }
 
+// User snapshot stored on the booking
 type User struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -266,6 +267,7 @@ func (x *User) GetPhoneNumber() string {
 	return ""
 }
 
+// Room snapshot stored on the booking
 type Room struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -328,8 +330,8 @@ func (x *Room) GetType() string {
 
 type NightlyRate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Date          string                 `protobuf:"bytes,1,opt,name=date,proto3" json:"date,omitempty"`
-	Price         int64                  `protobuf:"varint,2,opt,name=price,proto3" json:"price,omitempty"`
+	Date          string                 `protobuf:"bytes,1,opt,name=date,proto3" json:"date,omitempty"`    // YYYY-MM-DD
+	Price         int64                  `protobuf:"varint,2,opt,name=price,proto3" json:"price,omitempty"` // minor units
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

@@ -27,7 +27,7 @@ type Booking struct {
 	TotalAmount int64  `db:"total_amount" json:"total_amount"`
 	Currency    string `db:"currency" json:"currency"`
 
-	Status        Status `db:"status" json:"status"`
+	Status        Status        `db:"status" json:"status"`
 	PaymentStatus PaymentStatus `db:"payment_status" json:"payment_status"`
 
 	CreatedAt time.Time `db:"created_at" json:"created_at"`

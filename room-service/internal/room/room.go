@@ -1,12 +1,6 @@
 package room
 
-import (
-	"errors"
-	"time"
-)
-
-// ErrInvalidInput marks errors caused by bad caller input (handler maps it to 400)
-var ErrInvalidInput = errors.New("invalid input")
+import "time"
 
 type Room struct {
 	ID        string    `json:"id" db:"id"`

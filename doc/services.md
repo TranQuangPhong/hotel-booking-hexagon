@@ -15,10 +15,10 @@ Details: doc/uc1-create-booking/
 - AWS Cognito handles sign up, login & ROLE (later)
 - AWS Lambda to sync Cognito -> User service DB (later)
 - REST
-    + GET /users
-    + GET /users/{id}
-    + POST /users
-    + PUT /users/{id}
+    + GET /users/api/v1
+    + GET /users/api/v1/{id}
+    + POST /users/api/v1
+    + PUT /users/api/v1/{id}
 - Techstack: Golang + PostgreSQL
 
 3. Room service
@@ -26,10 +26,10 @@ Details: doc/uc1-create-booking/
 - Inventory: price per day, open/closed day
 - Reservations: hold a room for a date range (no double booking)
 - REST
-    + GET /rooms
-    + GET /rooms/{id}
-    + POST /rooms
-    + PUT /rooms/{id}
+    + GET /rooms/api/v1
+    + GET /rooms/api/v1/{id}
+    + POST /rooms/api/v1
+    + PUT /rooms/api/v1/{id}
 - gRPC
     + ReserveRoom
 - Kafka
@@ -40,8 +40,8 @@ Details: doc/uc1-create-booking/
 4. Booking service
 - Booking order: user & room snapshot, dates, price per night
 - REST
-    + GET /bookings
-    + GET /bookings/{id}       - client polls booking status
+    + GET /bookings/api/v1
+    + GET /bookings/api/v1/{id}       - client polls booking status
 - gRPC
     + CreateBooking
 - Kafka
@@ -53,7 +53,7 @@ Details: doc/uc1-create-booking/
 - Payment record, integrate PSP (Stripe)
 - Create checkout session (Stripe hosted page, client is redirected), receive webhook, capture payment
 - REST
-    + POST /payments/webhooks/stripe    - Stripe calls it
+    + POST /payments/api/v1/webhooks/stripe    - Stripe calls it
 - gRPC
     + CreateCheckoutSession
 - Kafka
@@ -71,8 +71,8 @@ Details: doc/uc1-create-booking/
 - Saga coordinator: calls services, sends commands, reacts to events
 - Deadline worker: release the room if the user doesn't pay in time
 - REST
-    + POST /orchestrator/bookings                  - create booking (hold room)
-    + POST /orchestrator/bookings/{id}/payment     - start payment
+    + POST /orchestrator/api/v1/bookings                  - create booking (hold room)
+    + POST /orchestrator/api/v1/bookings/{id}/payment     - start payment
 - Kafka
     + cmd (send):      ConfirmReservation, ReleaseRoom, CapturePayment, ConfirmBooking, ExpireBooking
     + event (consume): PaymentAuthorized, ReservationConfirmed, RoomReleased, PaymentCaptured, PaymentCaptureFailed, BookingConfirmed, BookingExpired

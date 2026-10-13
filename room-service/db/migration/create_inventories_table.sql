@@ -4,7 +4,7 @@ CREATE TABLE inventories (
     "year" SMALLINT NOT NULL,
     "month" SMALLINT NOT NULL,
     "days" JSONB NOT NULL, --status, price
-    currency VARCHAR(3) NOT NULL,
+    currency CHAR(3) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 

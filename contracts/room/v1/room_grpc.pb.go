@@ -26,6 +26,14 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type RoomServiceClient interface {
+	// ReserveRoom holds a room for the stay and returns the price snapshot.
+	// Idempotent by saga_id: a repeated call returns the stored reservation and prices.
+	//
+	// Errors:
+	//   - INVALID_ARGUMENT: bad ID or date, zero-night stay, check-in in the past
+	//   - NOT_FOUND: the room does not exist
+	//   - FAILED_PRECONDITION "ROOM_UNAVAILABLE": overlapping hold, MAINTENANCE night, no inventory, room not ACTIVE
+	//   - FAILED_PRECONDITION "RESERVATION_RELEASED": this saga_id's reservation was already released
 	ReserveRoom(ctx context.Context, in *ReserveRoomRequest, opts ...grpc.CallOption) (*ReserveRoomResponse, error)
 }
 
@@ -51,6 +59,14 @@ func (c *roomServiceClient) ReserveRoom(ctx context.Context, in *ReserveRoomRequ
 // All implementations must embed UnimplementedRoomServiceServer
 // for forward compatibility.
 type RoomServiceServer interface {
+	// ReserveRoom holds a room for the stay and returns the price snapshot.
+	// Idempotent by saga_id: a repeated call returns the stored reservation and prices.
+	//
+	// Errors:
+	//   - INVALID_ARGUMENT: bad ID or date, zero-night stay, check-in in the past
+	//   - NOT_FOUND: the room does not exist
+	//   - FAILED_PRECONDITION "ROOM_UNAVAILABLE": overlapping hold, MAINTENANCE night, no inventory, room not ACTIVE
+	//   - FAILED_PRECONDITION "RESERVATION_RELEASED": this saga_id's reservation was already released
 	ReserveRoom(context.Context, *ReserveRoomRequest) (*ReserveRoomResponse, error)
 	mustEmbedUnimplementedRoomServiceServer()
 }

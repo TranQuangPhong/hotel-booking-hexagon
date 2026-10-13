@@ -111,7 +111,7 @@ The orchestrator stays a separate service, not merged into Booking. Seeing the s
 |---|---|---|
 | `HOLD_TTL` | 15 min | at saga start, `deadline_at = now + HOLD_TTL`, also sent to Room as the reservation's `expires_at` |
 | `DEADLINE_POLL` | 10 s | deadline worker interval |
-| `GRPC_TIMEOUT` | 3 s | no retry in v1: an error in phase A goes to phase D; an error in phase B goes back to the client (`503`) and the saga stays as it is (retries = G3) |
+| `GRPC_TIMEOUT` | 3 s | no retry in v1: a timeout or other unknown outcome in phase A goes to phase D (a definite `ReserveRoom` rejection only fails the saga, see [flows.md](flows.md#phase-a-hold-room-and-create-booking-sync)); an error in phase B goes back to the client (`503`) and the saga stays as it is (retries = G3) |
 
 ## 6. Build order (each milestone is testable on its own)
 
