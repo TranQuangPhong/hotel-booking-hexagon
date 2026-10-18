@@ -65,7 +65,7 @@ func (s *Service) Update(ctx context.Context, room *Room) (*Room, error) {
 	return newRoom, nil
 }
 
-// TODO: txn
+// TODO: txn (later phase)
 // in: SagaID, RoomID, CheckInDate, CheckOutDate, ExpiresAt (set by the gRPC server); Reserve fills the rest
 func (s *Service) Reserve(ctx context.Context, r *Reservation) (*Reservation, *Room, error) {
 	// Check room available

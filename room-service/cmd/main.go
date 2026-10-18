@@ -56,7 +56,7 @@ func main() {
 	defer pool.Close()
 
 	// Init repository, service, handler, router
-	roomRepository := postgres.NewRoomRepository(ctx, pool)
+	roomRepository := postgres.NewRoomRepository(pool)
 	// inventoryRepository := postgres.NewInventoryRepository(ctx, pool)
 	roomService := room.NewService(roomRepository)
 	roomHander := handler.New(roomService)

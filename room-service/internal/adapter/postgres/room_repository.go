@@ -3,9 +3,12 @@ package postgres
 import (
 	"booking/room-service/internal/room"
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -13,7 +16,7 @@ type RoomRepository struct {
 	pool *pgxpool.Pool
 }
 
-func NewRoomRepository(ctx context.Context, pool *pgxpool.Pool) *RoomRepository {
+func NewRoomRepository(pool *pgxpool.Pool) *RoomRepository {
 	return &RoomRepository{pool: pool}
 }
 
@@ -23,26 +26,20 @@ func (r *RoomRepository) GetAll(ctx context.Context) ([]*room.Room, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var rooms []*room.Room
-	for rows.Next() {
-		var u room.Room
-		if err := rows.Scan(&u.ID, &u.Number, &u.Type, &u.Status, &u.CreatedAt, &u.UpdatedAt); err != nil {
-			return nil, err
-		}
-		rooms = append(rooms, &u)
-	}
-	return rooms, nil
+	return pgx.CollectRows(rows, pgx.RowToAddrOfStructByName[room.Room])
 }
 
 func (r *RoomRepository) GetByID(ctx context.Context, id string) (*room.Room, error) {
 	sql := `select id, number, type, status, created_at, updated_at from rooms where id = $1`
-	var u room.Room
-	if err := r.pool.QueryRow(ctx, sql, id).Scan(&u.ID, &u.Number, &u.Type, &u.Status, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	rows, err := r.pool.Query(ctx, sql, id)
+	if err != nil {
 		return nil, err
 	}
-	return &u, nil
+	u, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[room.Room])
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, room.ErrNotFound
+	}
+	return u, err
 }
 
 func (r *RoomRepository) Update(ctx context.Context, room *room.Room) (*room.Room, error) {
@@ -72,8 +69,9 @@ func (r *RoomRepository) Create(ctx context.Context, room *room.Room, inventorie
 	}
 	// Create inventory
 	sqlInventory :=
-		`insert into inventories (room_id, year, month, days, currency) values ($1, $2, $3, $4, $5)
-	 ON CONFLICT (room_id, year, month) DO NOTHING`
+		`insert into inventories (room_id, year, month, days, currency)
+		 values ($1, $2, $3, $4, $5)
+	 	 ON CONFLICT (room_id, year, month) DO NOTHING`
 	batch := &pgx.Batch{}
 	for _, inv := range inventories {
 		inv.RoomID = room.ID // only known after the room insert
@@ -101,4 +99,61 @@ func (r *RoomRepository) Create(ctx context.Context, room *room.Room, inventorie
 	}
 
 	return room, nil
+}
+
+// the rows of every month from firstNight to lastNight; a missing month is just absent, not an error
+func (r *RoomRepository) GetInventories(ctx context.Context, roomID string, firstNight, lastNight time.Time) ([]*room.Inventory, error) {
+	sql := `select id, room_id, year, month, days, currency, created_at, updated_at from inventories
+	 where room_id = $1
+	 and (year, month) >= ($2, $3)
+	 and (year, month) <= ($4, $5)
+	 order by year, month`
+	rows, err := r.pool.Query(ctx, sql, roomID,
+		firstNight.Year(), int(firstNight.Month()),
+		lastNight.Year(), int(lastNight.Month()))
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowToAddrOfStructByName[room.Inventory])
+}
+
+// nil, nil when the saga has no reservation yet: the normal first call, not an error
+func (r *RoomRepository) GetReservationBySagaID(ctx context.Context, sagaID string) (*room.Reservation, error) {
+	sql := `select id, saga_id, room_id, check_in_date, check_out_date,
+	 status, total_amount, currency, nightly_rates, expires_at, created_at, updated_at
+	 from reservations where saga_id = $1`
+	rows, err := r.pool.Query(ctx, sql, sagaID)
+	if err != nil {
+		return nil, err
+	}
+	rs, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[room.Reservation])
+	if errors.Is(err, pgx.ErrNoRows) { //It's fine to have no reservation
+		return nil, nil
+	}
+	return rs, err
+}
+
+// returns the stored row; ErrRoomUnavailable on an overlap
+func (r *RoomRepository) CreateReservation(ctx context.Context, rs *room.Reservation) (*room.Reservation, error) {
+	sql := `insert into reservations
+	 (saga_id, room_id, check_in_date, check_out_date,
+	 status, total_amount, currency, nightly_rates, expires_at)
+	 values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	 on conflict (saga_id) do nothing
+	 returning id, created_at, updated_at`
+	if err := r.pool.QueryRow(ctx, sql, rs.SagaID, rs.RoomID, rs.CheckInDate, rs.CheckOutDate,
+		rs.Status, rs.TotalAmount, rs.Currency, rs.NightlyRates, rs.ExpiresAt).
+		Scan(&rs.ID, &rs.CreatedAt, &rs.UpdatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) { //Existing 1 reservation already
+			return r.GetReservationBySagaID(ctx, rs.SagaID)
+		}
+		// 23P01: exclusion constraint, the dates overlap a live reservation of this room.
+		// 40P01: two overlapping inserts at the same moment deadlocked on that constraint and Postgres aborted this one.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && (pgErr.Code == "23P01" || pgErr.Code == "40P01") {
+			return nil, fmt.Errorf("reservation overlapped: %w", room.ErrRoomUnavailable)
+		}
+		return nil, err
+	}
+	return rs, nil
 }
