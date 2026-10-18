@@ -14,7 +14,7 @@ type Reservation struct {
 	Status       ReservationStatus `json:"status" db:"status"`
 	TotalAmount  int64             `json:"total_amount" db:"total_amount"`
 	Currency     string            `json:"currency" db:"currency"`
-	NightlyRates []NightlyRate     `json:"nightly_rates" db:"nightly_rates"` // json array [{date, price}]
+	NightlyRates []NightlyRate     `json:"nightly_rates" db:"nightly_rates"` // json array [{date, price}]. Eg: {"date":"2026-10-20T00:00:00Z","price":10000}
 	ExpiresAt    time.Time         `json:"expires_at" db:"expires_at"`
 	CreatedAt    time.Time         `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at" db:"updated_at"`
@@ -22,7 +22,7 @@ type Reservation struct {
 
 type ReservationStatus string
 type NightlyRate struct {
-	Date  time.Time `json:"date"` // YYYY-MM-DD
+	Date  time.Time `json:"date"` // 2026-10-20T00:00:00Z
 	Price int64     `json:"price"`
 }
 

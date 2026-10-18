@@ -134,7 +134,7 @@ room-service/
 │       │   ├── consumer.go           # UC1: room.commands -> room service
 │       │   └── mapper.go
 │       └── postgres/
-│           └── room_repository.go    # rooms + inventories (+ UC1: reservations (23P01 -> ErrRoomUnavailable) + outbox)
+│           └── room_repository.go    # rooms + inventories (+ UC1: reservations (overlap -> ErrRoomUnavailable) + outbox)
 ├── db/migration/
 └── go.mod
 ```

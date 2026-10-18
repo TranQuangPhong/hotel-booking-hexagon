@@ -30,9 +30,6 @@ func (s *Service) GetByID(ctx context.Context, id string) (*Room, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get room: %w", err)
 	}
-	if room == nil {
-		return nil, ErrNotFound
-	}
 	return room, nil
 }
 
@@ -72,9 +69,6 @@ func (s *Service) Reserve(ctx context.Context, r *Reservation) (*Reservation, *R
 	room, err := s.repository.GetByID(ctx, r.RoomID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get room: %w", err)
-	}
-	if room == nil {
-		return nil, nil, ErrNotFound
 	}
 
 	//Check existing reservation by saga ID

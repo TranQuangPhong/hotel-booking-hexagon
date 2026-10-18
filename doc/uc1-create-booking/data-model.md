@@ -77,7 +77,7 @@ CONSTRAINT check_dates CHECK (check_in_date < check_out_date)
 
 - `daterange` is `[check_in_date, check_out_date)`, so the check-out day is free for the next guest.
 - `check_dates`: a zero-night stay is an empty range. It overlaps nothing, so it would pass the exclusion constraint.
-- An overlap fails with SQLSTATE `23P01`, which the repository maps to `ErrRoomUnavailable`, which becomes gRPC `FAILED_PRECONDITION`. There is no "check, then insert": the insert is the check.
+- The insert uses `ON CONFLICT DO NOTHING` with no target, so a `saga_id` conflict and an overlap both skip the row (0 rows returned). The repository then looks up by `saga_id`: a row means an identical call committed first, so it returns that row; no row means an overlap, so `ErrRoomUnavailable`, which becomes gRPC `FAILED_PRECONDITION`. There is no "check, then insert": the insert is the check.
 - Price snapshot (`total_amount`, `currency`, `nightly_rates`): written once at reserve time from the inventory prices, and returned as stored when ReserveRoom is called again with the same `saga_id`. No `DEFAULT`, so a forgotten value is an error.
 - The primary key is `id`, like `rooms` / `bookings` / `users`. It is still called `reservation_id` in gRPC, Kafka and other tables.
 - No extra indexes: v1 looks rows up by `saga_id` (`UNIQUE`), and the constraint's GiST index does the overlap check. An `expires_at` index belongs to the G6 sweeper.

@@ -16,6 +16,9 @@ Done
 - M1 steps 1-3: contracts wired into room-service, reservations migration (exclusion constraint, price snapshot) + drop_all.sql,
   internal/inventory merged into internal/room
 - M1 step 4: core (internal/room): Reservation + setRates (unit tested), Repository ports, Service.Reserve
+- M1 step 5: Postgres adapter for all of room.Repository: ErrNotFound on GetByID / Update, CreateReservation with
+  ON CONFLICT DO NOTHING (no target) + lookup by saga_id. GetInventories keeps ORDER BY year, month (setRates takes
+  Currency from inventories[0])
 
 UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M1: Room ReserveRoom gRPC   <- NOW
@@ -25,24 +28,11 @@ UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M5: Payment: CreateCheckoutSession (Stripe hosted page) + Stripe webhook -> PaymentAuthorized
 - M6: Phase C (confirm room -> capture -> confirm booking) + notification consumer
 
-Next step: M1, Room ReserveRoom gRPC   <- resume at step 5 (steps 1-4 done)
+Next step: M1, Room ReserveRoom gRPC   <- resume at step 6 (steps 1-5 done)
 Not in M1: the orchestrator gRPC client (that is M3). Test with grpcurl
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
-Before step 5: re-build the room DB (drop_all.sql, then create rooms / inventories / reservations) and re-run the Postman room CRUD
+Before step 8 (if not done yet): re-build the room DB (drop_all.sql, then create rooms / inventories / reservations) and re-run the Postman room CRUD
 
-5. Postgres adapter: RoomRepository implements all of room.Repository
-   (reservation methods may go in postgres/reservation_repository.go, same struct). Each method runs on the pool
-    + GetByID: pgx.ErrNoRows -> room.ErrNotFound
-    + GetReservationBySagaID: SELECT by saga_id; pgx.ErrNoRows -> nil, nil
-    + GetInventories: WHERE room_id = $1 AND (year, month) >= ($2, $3) AND (year, month) <= ($4, $5)
-      (Postgres row comparison: compares year first, then month)
-      ORDER BY year, month: setRates takes Currency from inventories[0], which must be the first night's month
-    + CreateReservation: INSERT ... ON CONFLICT (saga_id) DO NOTHING RETURNING ...;
-      pgx.ErrNoRows (two identical calls racing, the other one inserted first) -> SELECT by saga_id
-    + nightly_rates: pass and scan []room.NightlyRate directly, pgx converts JSONB with encoding/json
-    + 23P01 -> room.ErrRoomUnavailable (errors.As(err, &pgErr) with *pgconn.PgError, then pgErr.Code)
-      (optional: 40P01 deadlock, from two simultaneous overlapping inserts -> ErrRoomUnavailable too)
-    + every query uses the request ctx, so the caller's 3 s deadline cancels a slow insert (see E6 below). No outbox row
 6. gRPC server (adapter/grpc): only maps, calls room.Service
     + type Server struct { roomv1.UnimplementedRoomServiceServer; svc *room.Service }, func New(svc *room.Service) *Server
     + func (s *Server) ReserveRoom(ctx context.Context, req *roomv1.ReserveRoomRequest) (*roomv1.ReserveRoomResponse, error)
@@ -76,6 +66,8 @@ Why (decided 2026-10-12)
 - Reserve reads the room: the response carries room_number + room_type, and an INACTIVE / ARCHIVED room still has AVAILABLE days
 - Reserve without a tx in v1 (2026-10-15): its only write is one INSERT, and the constraints cover overlap, dates and a
   repeated saga_id. Accepted race: an admin change of room status / day status / price between the reads and the insert
+- ON CONFLICT DO NOTHING with no target (2026-10-19): with (saga_id) only, two identical calls at the same moment
+  could fail on the overlap constraint (23P01, or 40P01 deadlock) and return ROOM_UNAVAILABLE for their own hold
 - The orchestrator makes one call (ReserveRoom) and checks nothing itself
 - Idempotent by saga_id: the same call or message arriving a second time (caller retry, Kafka redelivery) gives the same
   result. Nobody triggers a repeat and there is no API for it; test it by sending the same request twice
@@ -101,6 +93,7 @@ Notes for later milestones
 Cleanup (any time)
 - contracts/envelope: round-trip test (skipped in step 1, do it once the real gRPC call works)
 - handler.go: GetRoomByID returns 404 for every error, UpdateRoom returns 500 for a missing room -> use ErrNotFound
+  (the repository returns ErrNotFound for both now; only the handler mapping is left)
 
 Docs to sync
 - flows.md, state-machines.md, README timers: room status + date validation in ReserveRoom; ReserveRoom is idempotent by saga_id

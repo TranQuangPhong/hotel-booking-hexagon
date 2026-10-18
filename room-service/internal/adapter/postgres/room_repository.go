@@ -8,13 +8,15 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type RoomRepository struct {
 	pool *pgxpool.Pool
 }
+
+// compile-time check: a mismatch with the port fails here, not at the NewService call in main.go
+var _ room.Repository = (*RoomRepository)(nil)
 
 func NewRoomRepository(pool *pgxpool.Pool) *RoomRepository {
 	return &RoomRepository{pool: pool}
@@ -42,18 +44,21 @@ func (r *RoomRepository) GetByID(ctx context.Context, id string) (*room.Room, er
 	return u, err
 }
 
-func (r *RoomRepository) Update(ctx context.Context, room *room.Room) (*room.Room, error) {
+func (r *RoomRepository) Update(ctx context.Context, rm *room.Room) (*room.Room, error) {
 	sql := `update rooms set number = $1, type = $2, status = $3, updated_at = NOW()
 	 where id = $4 RETURNING id, number, type, status, created_at, updated_at`
-	if err := r.pool.QueryRow(ctx, sql, room.Number, room.Type, room.Status, room.ID).
-		Scan(&room.ID, &room.Number, &room.Type, &room.Status, &room.CreatedAt, &room.UpdatedAt); err != nil {
+	if err := r.pool.QueryRow(ctx, sql, rm.Number, rm.Type, rm.Status, rm.ID).
+		Scan(&rm.ID, &rm.Number, &rm.Type, &rm.Status, &rm.CreatedAt, &rm.UpdatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, room.ErrNotFound
+		}
 		return nil, err
 	}
-	return room, nil
+	return rm, nil
 }
 
 // Create room & inventory for next 1 year
-func (r *RoomRepository) Create(ctx context.Context, room *room.Room, inventories []*room.Inventory) (*room.Room, error) {
+func (r *RoomRepository) Create(ctx context.Context, rm *room.Room, inventories []*room.Inventory) (*room.Room, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
@@ -63,8 +68,8 @@ func (r *RoomRepository) Create(ctx context.Context, room *room.Room, inventorie
 	// Create room
 	sqlRoom := `insert into rooms (number, type, status) values ($1, $2, $3)
 	 returning id, created_at, updated_at`
-	if err = tx.QueryRow(ctx, sqlRoom, room.Number, room.Type, room.Status).
-		Scan(&room.ID, &room.CreatedAt, &room.UpdatedAt); err != nil {
+	if err = tx.QueryRow(ctx, sqlRoom, rm.Number, rm.Type, rm.Status).
+		Scan(&rm.ID, &rm.CreatedAt, &rm.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("failed to insert room: %w", err)
 	}
 	// Create inventory
@@ -74,7 +79,7 @@ func (r *RoomRepository) Create(ctx context.Context, room *room.Room, inventorie
 	 	 ON CONFLICT (room_id, year, month) DO NOTHING`
 	batch := &pgx.Batch{}
 	for _, inv := range inventories {
-		inv.RoomID = room.ID // only known after the room insert
+		inv.RoomID = rm.ID // only known after the room insert
 		batch.Queue(sqlInventory, inv.RoomID, inv.Year, inv.Month, inv.Days, inv.Currency)
 	}
 	results := tx.SendBatch(ctx, batch)
@@ -98,7 +103,7 @@ func (r *RoomRepository) Create(ctx context.Context, room *room.Room, inventorie
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	return room, nil
+	return rm, nil
 }
 
 // the rows of every month from firstNight to lastNight; a missing month is just absent, not an error
@@ -135,24 +140,29 @@ func (r *RoomRepository) GetReservationBySagaID(ctx context.Context, sagaID stri
 
 // returns the stored row; ErrRoomUnavailable on an overlap
 func (r *RoomRepository) CreateReservation(ctx context.Context, rs *room.Reservation) (*room.Reservation, error) {
+	// on conflict with no target: any unique or exclusion conflict (saga_id, reservations_no_overlap) skips the row,
+	// after Postgres waits for the other insert to commit. Two inserts at the same moment don't deadlock this way
 	sql := `insert into reservations
 	 (saga_id, room_id, check_in_date, check_out_date,
 	 status, total_amount, currency, nightly_rates, expires_at)
 	 values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	 on conflict (saga_id) do nothing
+	 on conflict do nothing
 	 returning id, created_at, updated_at`
-	if err := r.pool.QueryRow(ctx, sql, rs.SagaID, rs.RoomID, rs.CheckInDate, rs.CheckOutDate,
+	err := r.pool.QueryRow(ctx, sql, rs.SagaID, rs.RoomID, rs.CheckInDate, rs.CheckOutDate,
 		rs.Status, rs.TotalAmount, rs.Currency, rs.NightlyRates, rs.ExpiresAt).
-		Scan(&rs.ID, &rs.CreatedAt, &rs.UpdatedAt); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) { //Existing 1 reservation already
-			return r.GetReservationBySagaID(ctx, rs.SagaID)
+		Scan(&rs.ID, &rs.CreatedAt, &rs.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// skipped: the row in the way is our own (an identical call committed first) or another saga's overlap
+		own, getErr := r.GetReservationBySagaID(ctx, rs.SagaID)
+		if getErr != nil {
+			return nil, getErr
 		}
-		// 23P01: exclusion constraint, the dates overlap a live reservation of this room.
-		// 40P01: two overlapping inserts at the same moment deadlocked on that constraint and Postgres aborted this one.
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && (pgErr.Code == "23P01" || pgErr.Code == "40P01") {
-			return nil, fmt.Errorf("reservation overlapped: %w", room.ErrRoomUnavailable)
+		if own == nil {
+			return nil, fmt.Errorf("dates overlap another reservation: %w", room.ErrRoomUnavailable)
 		}
+		return own, nil
+	}
+	if err != nil {
 		return nil, err
 	}
 	return rs, nil
