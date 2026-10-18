@@ -7,3 +7,6 @@ import "errors"
 
 // ErrInvalidInput marks errors caused by bad caller input (handler maps it to 400)
 var ErrInvalidInput = errors.New("invalid input")
+var ErrNotFound = errors.New("room not found")
+var ErrReservationReleased = errors.New("reservation already released")
+var ErrRoomUnavailable = errors.New("room unavailable") //overlap, maintain, not active
