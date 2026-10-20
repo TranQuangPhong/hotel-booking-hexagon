@@ -19,6 +19,8 @@ Done
 - M1 step 5: Postgres adapter for all of room.Repository: ErrNotFound on GetByID / Update, CreateReservation with
   ON CONFLICT DO NOTHING (no target) + lookup by saga_id. GetInventories keeps ORDER BY year, month (setRates takes
   Currency from inventories[0])
+- M1 step 6: gRPC server (adapter/grpc/server.go): ReserveRoom + toReservation / toResponse in the same file (one RPC,
+  no mapper.go). Domain errors -> codes as in room.proto; INVALID_ARGUMENT carries the field, INTERNAL is logged
 
 UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M1: Room ReserveRoom gRPC   <- NOW
@@ -28,24 +30,11 @@ UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M5: Payment: CreateCheckoutSession (Stripe hosted page) + Stripe webhook -> PaymentAuthorized
 - M6: Phase C (confirm room -> capture -> confirm booking) + notification consumer
 
-Next step: M1, Room ReserveRoom gRPC   <- resume at step 6 (steps 1-5 done)
+Next step: M1, Room ReserveRoom gRPC   <- resume at step 7 (steps 1-6 done)
 Not in M1: the orchestrator gRPC client (that is M3). Test with grpcurl
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
 Before step 8 (if not done yet): re-build the room DB (drop_all.sql, then create rooms / inventories / reservations) and re-run the Postman room CRUD
 
-6. gRPC server (adapter/grpc): only maps, calls room.Service
-    + type Server struct { roomv1.UnimplementedRoomServiceServer; svc *room.Service }, func New(svc *room.Service) *Server
-    + func (s *Server) ReserveRoom(ctx context.Context, req *roomv1.ReserveRoomRequest) (*roomv1.ReserveRoomResponse, error)
-    + validate here -> INVALID_ARGUMENT: saga_id + room_id are UUIDs, dates parse as YYYY-MM-DD, expires_at is set
-      (uuid.Parse, time.Parse(time.DateOnly, s) gives midnight UTC, req.GetExpiresAt().CheckValid())
-    + mapper.go: toReservation(req) *room.Reservation, toReserveRoomResponse(*room.Reservation, *room.Room)
-      (expires_at.AsTime(); NightlyRate.Date -> "YYYY-MM-DD")
-    + errors (errors.Is, then status.Error(codes.X, msg)):
-              ErrInvalidInput        -> INVALID_ARGUMENT
-              ErrNotFound            -> NOT_FOUND
-              ErrRoomUnavailable     -> FAILED_PRECONDITION "ROOM_UNAVAILABLE"
-              ErrReservationReleased -> FAILED_PRECONDITION "RESERVATION_RELEASED"
-              anything else          -> INTERNAL (generic message, real error in the log)
 7. config + cmd/main.go
     + GRPC_PORT (config.go, .env.example); net.Listen, grpc.NewServer,
       RegisterRoomServiceServer(srv, roomgrpc.New(roomService)), Serve in a goroutine
@@ -55,6 +44,8 @@ Before step 8 (if not done yet): re-build the room DB (drop_all.sql, then create
       does not recover a handler panic, it kills the whole process. The interceptor turns it into INTERNAL
     + GracefulStop() next to the HTTP Shutdown; import alias for adapter/grpc
 8. Done when (test room: POST /rooms, no seed SQL)
+    + use a new saga_id for every call except the repeat test: the same saga_id returns the stored hold, even for
+      another room or dates (good-to-have.md G3)
     + grpcurl reserves
     + a 2nd overlapping call fails with ROOM_UNAVAILABLE
     + the same saga_id again returns the same reservation_id and prices
@@ -78,8 +69,6 @@ Notes for later milestones
     + unknown outcome (timeout, UNAVAILABLE, INTERNAL) -> phase D, reply 503
 - M3: saga_instances migration is behind data-model.md: add deadline_at (= ReserveRoom expires_at) + user_id + idx_saga_deadline,
   reservation_id TEXT -> UUID
-- E6 (accepted in v1): ReserveRoom commits after ReleaseRoom already found "no row" -> a hold that nobody releases
-  (the saga is FAILED, no sweeper). Mitigation: the request ctx on every query (step 5)
 - Later (when the admin inventory-edit API exists): Reserve in one tx
     + port: RunInTx(ctx context.Context, fn func(txRepo Repository) error) error. The core passes the steps,
       the adapter runs Begin, fn(the struct bound to the tx), Commit (the struct holds a small query interface
@@ -88,7 +77,6 @@ Notes for later milestones
       and two Reserve calls never block each other
     + M4 message handlers (flows.md "Shape of every message handler": FOR UPDATE -> status check -> UPDATE + outbox)
       may need the same pattern, so RunInTx can come back in M4: decide there
-- Later phases: extend the inventory horizon (a room gets 12 months at creation, nothing adds more)
 
 Cleanup (any time)
 - contracts/envelope: round-trip test (skipped in step 1, do it once the real gRPC call works)
@@ -98,7 +86,6 @@ Cleanup (any time)
 Docs to sync
 - flows.md, state-machines.md, README timers: room status + date validation in ReserveRoom; ReserveRoom is idempotent by saga_id
   (a repeated call returns the stored row)
-- good-to-have.md: add E6 and the inventory horizon; E4 becomes "not checked in v1"
 - use-cases.md line 35: "Update inventory" is stale (occupancy lives only in reservations)
 
 After UC1
