@@ -21,6 +21,9 @@ Done
   Currency from inventories[0])
 - M1 step 6: gRPC server (adapter/grpc/server.go): ReserveRoom + toReservation / toResponse in the same file (one RPC,
   no mapper.go). Domain errors -> codes as in room.proto; INVALID_ARGUMENT carries the field, INTERNAL is logged
+- M1 step 7: GRPC_PORT as config.GRPC{Port} (same shape as payment-service); main.go runs the gRPC server next to
+  HTTP: recovery handler logs panic + stack and returns INTERNAL (v2's default sends UNKNOWN + stack, logs nothing),
+  reflection for grpcurl (dev only), GracefulStop bounded by the 5 s shutdown ctx (context.AfterFunc -> Stop)
 
 UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M1: Room ReserveRoom gRPC   <- NOW
@@ -30,19 +33,11 @@ UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M5: Payment: CreateCheckoutSession (Stripe hosted page) + Stripe webhook -> PaymentAuthorized
 - M6: Phase C (confirm room -> capture -> confirm booking) + notification consumer
 
-Next step: M1, Room ReserveRoom gRPC   <- resume at step 7 (steps 1-6 done)
+Next step: M1, Room ReserveRoom gRPC   <- resume at step 8 (steps 1-7 done)
 Not in M1: the orchestrator gRPC client (that is M3). Test with grpcurl
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
 Before step 8 (if not done yet): re-build the room DB (drop_all.sql, then create rooms / inventories / reservations) and re-run the Postman room CRUD
 
-7. config + cmd/main.go
-    + GRPC_PORT (config.go, .env.example); net.Listen, grpc.NewServer,
-      RegisterRoomServiceServer(srv, roomgrpc.New(roomService)), Serve in a goroutine
-    + reflection.Register (dev only): grpcurl works without -proto flags
-    + grpc.NewServer(grpc.ChainUnaryInterceptor(recovery.UnaryServerInterceptor()))
-      (github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery): unlike gin.Recovery, grpc-go
-      does not recover a handler panic, it kills the whole process. The interceptor turns it into INTERNAL
-    + GracefulStop() next to the HTTP Shutdown; import alias for adapter/grpc
 8. Done when (test room: POST /rooms, no seed SQL)
     + use a new saga_id for every call except the repeat test: the same saga_id returns the stored hold, even for
       another room or dates (good-to-have.md G3)
@@ -69,6 +64,8 @@ Notes for later milestones
     + unknown outcome (timeout, UNAVAILABLE, INTERNAL) -> phase D, reply 503
 - M3: saga_instances migration is behind data-model.md: add deadline_at (= ReserveRoom expires_at) + user_id + idx_saga_deadline,
   reservation_id TEXT -> UUID
+- M4: main.go -> errgroup (hexagonal-structure.md section 5) once the Kafka consumer + outbox poller join HTTP + gRPC:
+  one failing goroutine then stops the others and the defers run (pool.Close), instead of os.Exit in each goroutine
 - Later (when the admin inventory-edit API exists): Reserve in one tx
     + port: RunInTx(ctx context.Context, fn func(txRepo Repository) error) error. The core passes the steps,
       the adapter runs Begin, fn(the struct bound to the tx), Commit (the struct holds a small query interface

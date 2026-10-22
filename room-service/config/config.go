@@ -10,12 +10,17 @@ import (
 )
 
 type Config struct {
-	Server Server
+	Server Server // REST: room CRUD
+	GRPC   GRPC   // gRPC: ReserveRoom
 	DB     DB
 	Kafka  Kafka
 }
 
 type Server struct {
+	Port int
+}
+
+type GRPC struct {
 	Port int
 }
 
@@ -41,6 +46,11 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("invalid SERVER_PORT: %w", err)
 	}
 
+	grpcPort, err := strconv.Atoi(os.Getenv("GRPC_PORT"))
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid GRPC_PORT: %w", err)
+	}
+
 	dbPort, err := strconv.Atoi(os.Getenv("DB_PORT"))
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid DB_PORT: %w", err)
@@ -54,6 +64,9 @@ func Load() (Config, error) {
 	return Config{
 		Server: Server{
 			Port: serverPort,
+		},
+		GRPC: GRPC{
+			Port: grpcPort,
 		},
 		DB: DB{
 			Host:     os.Getenv("DB_HOST"),

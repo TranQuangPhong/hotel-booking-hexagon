@@ -8,6 +8,7 @@ require (
 	github.com/TranQuangPhong/hotel-booking-logger v1.0.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
+	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.4
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/joho/godotenv v1.5.1
 	google.golang.org/grpc v1.84.0

@@ -1,21 +1,30 @@
 package main
 
 import (
+	roomv1 "booking/contracts/room/v1"
 	"booking/room-service/config"
+	roomgrpc "booking/room-service/internal/adapter/grpc"
 	"booking/room-service/internal/adapter/handler"
 	"booking/room-service/internal/adapter/postgres"
 	"booking/room-service/internal/room"
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
 	logger "github.com/TranQuangPhong/hotel-booking-logger"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 )
 
 func main() {
@@ -76,6 +85,35 @@ func main() {
 		}
 	}()
 
+	// Start grpc server
+	grpcPort := fmt.Sprintf(":%d", cfg.GRPC.Port)
+	lis, err := net.Listen("tcp", grpcPort)
+	if err != nil {
+		slog.Error("grpc: failed to listen", "addr", grpcPort, "error", err.Error())
+		os.Exit(1)
+	}
+	opts := []grpc.ServerOption{
+		grpc.ChainUnaryInterceptor(
+			// Without a handler, v2 sends a panic to the client as UNKNOWN + stack trace and logs nothing
+			recovery.UnaryServerInterceptor(recovery.WithRecoveryHandlerContext(
+				func(ctx context.Context, p any) error {
+					slog.ErrorContext(ctx, "grpc handler panic", "panic", p, "stack", string(debug.Stack()))
+					return status.Error(codes.Internal, "internal server error")
+				},
+			)),
+		),
+	}
+	grpcServer := grpc.NewServer(opts...)
+	roomv1.RegisterRoomServiceServer(grpcServer, roomgrpc.New(roomService))
+	reflection.Register(grpcServer) // dev: grpcurl list/describe without -proto; gate it before deploying
+	go func() {
+		slog.Info("grpc server is starting...", "addr", grpcPort)
+		if err := grpcServer.Serve(lis); err != nil {
+			slog.Error("failed to start grpc server", "error", err.Error())
+			os.Exit(1)
+		}
+	}()
+
 	// Block main thread waiting for shutdown signal
 	<-ctx.Done()
 	slog.Info("Shutdown signal received, exiting")
@@ -88,6 +126,13 @@ func main() {
 	} else {
 		slog.Info("HTTP server exiting gracefully")
 	}
-
+	// GracefulStop has no time limit: Stop force-closes the running RPCs once shutdownCtx expires
+	cancelForceStop := context.AfterFunc(shutdownCtx, grpcServer.Stop)
+	grpcServer.GracefulStop()
+	if cancelForceStop() {
+		slog.Info("gRPC server exiting gracefully")
+	} else {
+		slog.Error("gRPC server forced to stop")
+	}
 	slog.Info("Service exiting gracefully")
 }
