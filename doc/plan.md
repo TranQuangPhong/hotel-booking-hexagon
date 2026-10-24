@@ -36,7 +36,8 @@ UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 Next step: M1, Room ReserveRoom gRPC   <- resume at step 8 (steps 1-7 done)
 Not in M1: the orchestrator gRPC client (that is M3). Test with grpcurl
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
-Before step 8 (if not done yet): re-build the room DB (drop_all.sql, then create rooms / inventories / reservations) and re-run the Postman room CRUD
+Before step 8 (if not done yet): re-run the Postman room CRUD. Room DB migrated in place 2026-10-25 (rooms kept, inventories +
+reservations created); rooms 101-104 have no inventories, so test with a new POST /rooms
 
 8. Done when (test room: POST /rooms, no seed SQL)
     + use a new saga_id for every call except the repeat test: the same saga_id returns the stored hold, even for

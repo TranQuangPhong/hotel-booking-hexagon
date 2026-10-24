@@ -92,7 +92,9 @@ CONSTRAINT check_dates CHECK (check_in_date < check_out_date)
 |---|---|
 | `saga_id UUID NOT NULL UNIQUE` | idempotent CreateBooking + lookup for commands |
 | `reservation_id UUID NOT NULL` | reference only |
-| `expires_at TIMESTAMPTZ` | UI countdown while `PENDING` |
+| `expires_at TIMESTAMPTZ NOT NULL` | UI countdown while `PENDING`; CreateBooking always sends it |
+| `user_id`, `room_id` UUID (were TEXT); `total_amount` without `DEFAULT` | IDs are UUIDs everywhere; a forgotten total is an error, not 0 |
+| `nightly_rates JSONB NOT NULL` (`[{date, price}]`), no `nightly_rates` table | written once by CreateBooking and read with the booking, never queried by night (same as `reservations.nightly_rates`) |
 | `booking_status` enum | see [state-machines.md](state-machines.md#booking) |
 
 ## Payment (new)

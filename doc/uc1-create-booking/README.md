@@ -83,8 +83,8 @@ flowchart LR
 | Service | Source of truth | Runs |
 |---|---|---|
 | **Orchestrator** | `saga_instances` | REST · Kafka consumer · outbox poller · **deadline worker** |
-| **Room** | `reservations` (occupancy), `inventory` (price, closed days) | gRPC · Kafka consumer · outbox poller |
-| **Booking** | `bookings` + `nightly_rates` | REST GET · gRPC · Kafka consumer · outbox poller |
+| **Room** | `reservations` (occupancy), `inventories` (price, closed days) | gRPC · Kafka consumer · outbox poller |
+| **Booking** | `bookings` (nightly rates in a JSONB column) | REST GET · gRPC · Kafka consumer · outbox poller |
 | **Payment** | `payments`, everything Stripe | gRPC · webhook · Kafka consumer · outbox poller |
 | **Notification** | none in v1 | Kafka consumer (logs "email sent") |
 
