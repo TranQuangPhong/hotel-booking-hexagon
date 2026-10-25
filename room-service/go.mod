@@ -5,7 +5,7 @@ go 1.25.5
 require booking/contracts v0.0.0
 
 require (
-	github.com/TranQuangPhong/hotel-booking-logger v1.0.0
+	github.com/TranQuangPhong/hotel-booking-logger v1.1.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.4

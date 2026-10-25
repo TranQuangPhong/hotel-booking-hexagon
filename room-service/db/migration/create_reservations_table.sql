@@ -15,7 +15,7 @@ CREATE TABLE reservations (
     "status"        reservation_status NOT NULL DEFAULT 'RESERVED',
     total_amount    BIGINT NOT NULL,  -- snapshot, minor units
     currency        CHAR(3) NOT NULL, -- snapshot
-    nightly_rates   JSONB NOT NULL, -- snapshot, [{date, price}]
+    nightly_rates   JSONB NOT NULL, -- snapshot, [{"date":"2026-10-25","price":12000}]: date YYYY-MM-DD, price minor units
     expires_at      TIMESTAMPTZ NOT NULL,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),

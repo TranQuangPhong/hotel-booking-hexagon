@@ -1,6 +1,7 @@
 package room
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -113,5 +114,33 @@ func TestSetRates(t *testing.T) {
 				t.Errorf("Currency = %q, want %q", r.Currency, "USD")
 			}
 		})
+	}
+}
+
+func TestNightlyRateJSON(t *testing.T) {
+	rates := []NightlyRate{{date(2026, 10, 25), 12000}, {date(2026, 10, 26), 13000}}
+	const want = `[{"date":"2026-10-25","price":12000},{"date":"2026-10-26","price":13000}]`
+
+	b, err := json.Marshal(rates)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(b) != want {
+		t.Fatalf("marshal = %s, want %s", b, want)
+	}
+
+	var got []NightlyRate
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for i := range rates {
+		if !got[i].Date.Equal(rates[i].Date) || got[i].Price != rates[i].Price {
+			t.Errorf("night %d = %+v, want %+v", i, got[i], rates[i])
+		}
+	}
+
+	var old []NightlyRate
+	if err := json.Unmarshal([]byte(`[{"date":"2026-10-25T00:00:00Z","price":12000}]`), &old); err == nil {
+		t.Error("unmarshal of an RFC 3339 date: want an error, got nil")
 	}
 }

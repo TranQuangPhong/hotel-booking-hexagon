@@ -19,6 +19,7 @@ import (
 	"time"
 
 	logger "github.com/TranQuangPhong/hotel-booking-logger"
+	grpclogger "github.com/TranQuangPhong/hotel-booking-logger/grpclogger"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
@@ -39,7 +40,7 @@ func main() {
 	// Load env config
 	cfg, err := config.Load()
 	if err != nil {
-		slog.Error("failed to load config", "error", err.Error())
+		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
 
@@ -54,11 +55,11 @@ func main() {
 	)
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
-		slog.Error("failed to init postgresql", "error", err.Error())
+		slog.Error("failed to init postgresql", "error", err)
 		os.Exit(1)
 	}
 	if err := pool.Ping(ctx); err != nil {
-		slog.Error("failed to ping postgresql server", "error", err.Error())
+		slog.Error("failed to ping postgresql server", "error", err)
 		pool.Close()
 		os.Exit(1)
 	}
@@ -80,7 +81,7 @@ func main() {
 	go func() {
 		slog.Info("Server is starting...", "addr", httpServerPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("failed to start http server", "error", err.Error())
+			slog.Error("failed to start http server", "error", err)
 			os.Exit(1)
 		}
 	}()
@@ -89,11 +90,12 @@ func main() {
 	grpcPort := fmt.Sprintf(":%d", cfg.GRPC.Port)
 	lis, err := net.Listen("tcp", grpcPort)
 	if err != nil {
-		slog.Error("grpc: failed to listen", "addr", grpcPort, "error", err.Error())
+		slog.Error("grpc: failed to listen", "addr", grpcPort, "error", err)
 		os.Exit(1)
 	}
 	opts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
+			grpclogger.UnaryServerInterceptor(),
 			// Without a handler, v2 sends a panic to the client as UNKNOWN + stack trace and logs nothing
 			recovery.UnaryServerInterceptor(recovery.WithRecoveryHandlerContext(
 				func(ctx context.Context, p any) error {
@@ -109,7 +111,7 @@ func main() {
 	go func() {
 		slog.Info("grpc server is starting...", "addr", grpcPort)
 		if err := grpcServer.Serve(lis); err != nil {
-			slog.Error("failed to start grpc server", "error", err.Error())
+			slog.Error("failed to start grpc server", "error", err)
 			os.Exit(1)
 		}
 	}()
@@ -122,7 +124,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error("HTTP server forced to shutdown", "error", err.Error())
+		slog.Error("HTTP server forced to shutdown", "error", err)
 	} else {
 		slog.Info("HTTP server exiting gracefully")
 	}
