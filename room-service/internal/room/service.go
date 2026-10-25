@@ -55,6 +55,12 @@ func (s *Service) Create(ctx context.Context, room *Room, rate Rate) (*Room, err
 }
 
 func (s *Service) Update(ctx context.Context, room *Room) (*Room, error) {
+	if !room.Type.IsValid() {
+		return nil, fmt.Errorf("%w: room type %q", ErrInvalidInput, room.Type)
+	}
+	if !room.Status.IsValid() {
+		return nil, fmt.Errorf("%w: room status %q", ErrInvalidInput, room.Status)
+	}
 	newRoom, err := s.repository.Update(ctx, room)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update room: %w", err)

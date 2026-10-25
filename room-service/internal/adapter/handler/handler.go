@@ -62,10 +62,14 @@ func (h *Handler) UpdateRoom(c *gin.Context) {
 		return
 	}
 	id := c.Param("id")
-	room := req.ToRoom(id)
+	rm := req.ToRoom(id)
 
-	updatedRoom, err := h.roomSerivce.Update(c.Request.Context(), room)
+	updatedRoom, err := h.roomSerivce.Update(c.Request.Context(), rm)
 	if err != nil {
+		if errors.Is(err, room.ErrInvalidInput) {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
 		return
 	}
