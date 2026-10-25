@@ -83,11 +83,13 @@ Work split: I write the main gRPC logic by hand; Claude handles the subtle detai
           200 touched month rows, 400 ErrInvalidInput, 404 ErrNotFound, 409 ErrReserved
         + UpdateRoom: + 404 ErrNotFound (taken over from Cleanup), 409 ErrReserved
     + Docs (same pass): services.md room REST (+ PATCH), data-model.md Room (days change only through it: status / price,
-      never currency or new days), good-to-have.md E4 (holds by construction: the edit takes no currency), Postman
+      never currency or new days), good-to-have.md E4 (holds by construction: the edit takes no currency), Postman,
+      CLAUDE.md Commands: drop "no tests yet" from go test (room-service has unit tests in internal/room)
     + Done when (Postman + grpcurl, test room from a new POST /rooms)
         + PATCH a price from today to 2099-12-31: every existing day from today changes; earlier days of this month
           don't, and no month is added
         + ReserveRoom, PATCH another price on those nights, the same saga_id again -> the old prices (snapshot)
+          + DB: that new reservation's nightly_rates has "date":"YYYY-MM-DD" (first live insert since NightlyRate MarshalJSON)
         + PATCH MAINTENANCE on free nights -> ReserveRoom over them fails with ROOM_UNAVAILABLE
         + PATCH MAINTENANCE on a held night -> 409; PUT the room INACTIVE while it has a hold -> 409
         + PATCH a past first_night or no field -> 400; PUT / PATCH an unknown room id -> 404
@@ -142,6 +144,12 @@ Notes for later milestones
     + the FK on reservations.room_id doesn't do this: its FOR KEY SHARE doesn't conflict with an UPDATE that keeps the key
     + M4 message handlers (flows.md "Shape of every message handler": FOR UPDATE -> status check -> UPDATE + outbox)
       may need the same pattern, so RunInTx can come back in M4: decide there
+    + test by hand with two sessions (a mocked unit test has no tx or lock, so it can't show this). psql session A plays
+      the admin: BEGIN; SELECT id FROM rooms WHERE id = '<room>' FOR UPDATE; -> grpcurl ReserveRoom hangs (its FOR SHARE
+      waits) -> A: UPDATE rooms SET status = 'INACTIVE' ...; COMMIT; -> ReserveRoom returns ROOM_UNAVAILABLE (READ
+      COMMITTED: a FOR SHARE that waited reads the row as A committed it). Two admin edits: Postman PATCH instead of
+      grpcurl, it waits for A's COMMIT. Before the fix the same script shows the race (Reserve doesn't wait). A Go
+      integration test (real DB, two txs + timeout) is later: phase 1 has no test DB
 
 Cleanup (any time)
 - contracts/envelope: round-trip test (skipped in step 1, do it once the real gRPC call works)
