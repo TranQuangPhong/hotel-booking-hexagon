@@ -30,7 +30,7 @@ func main() {
 	// Load env config
 	cfg, err := config.Load()
 	if err != nil {
-		slog.Error("failed to load config", "error", err.Error())
+		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
 
@@ -45,11 +45,11 @@ func main() {
 	)
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
-		slog.Error("failed to init postgresql", "error", err.Error())
+		slog.Error("failed to init postgresql", "error", err)
 		os.Exit(1)
 	}
 	if err := pool.Ping(ctx); err != nil {
-		slog.Error("failed to ping postgresql server", "error", err.Error())
+		slog.Error("failed to ping postgresql server", "error", err)
 		pool.Close()
 		os.Exit(1)
 	}
@@ -70,7 +70,7 @@ func main() {
 	go func() {
 		slog.Info("Server is starting...", "addr", httpServerPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("failed to start http server", "error", err.Error())
+			slog.Error("failed to start http server", "error", err)
 			os.Exit(1)
 		}
 	}()
@@ -83,7 +83,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error("HTTP server forced to shutdown", "error", err.Error())
+		slog.Error("HTTP server forced to shutdown", "error", err)
 	} else {
 		slog.Info("HTTP server exiting gracefully")
 	}
