@@ -81,7 +81,7 @@ Rules:
 ## Conventions (follow existing code)
 
 - Go 1.25; each service is its **own Go module** (`module booking/<svc>-service`). Shared code: the logger (separate git repo) plus `contracts/` and `platform/` (modules in this repo, `replace` directives, not `go.work` alone, because `go mod tidy` ignores it).
-- Shared logger: `github.com/TranQuangPhong/hotel-booking-logger`, which is my own library. `slog.SetDefault(logger.NewLogger())` plus `logger.LoggingMiddleware()` in Gin.
+- Shared logger: `github.com/TranQuangPhong/hotel-booking-logger`, which is my own library. `slog.SetDefault(logger.NewLogger())` plus `logger.LoggingMiddleware()` in Gin; services with a gRPC server also put `grpclogger.UnaryServerInterceptor()` first in `grpc.ChainUnaryInterceptor` (subpackage `/grpclogger`, v1.1.0+).
 - HTTP: Gin, `gin.New()` + `Recovery` + logging middleware. Routes are `/<prefix>/health` and `/<prefix>/api/v1/...`, with a unique prefix per service (`/users`, `/rooms`, `/bookings`, `/orchestrator`, `/payments`). Versioning lives in code; the gateway (later) only routes and rewrites.
 - DB: `pgx/v5` + `pgxpool`, raw SQL, no ORM. Multi-table writes run in a transaction with `defer tx.Rollback(ctx)`, and bulk inserts use `pgx.Batch`.
 - IDs are UUIDs (`gen_random_uuid()`), handled as `string` in Go.
@@ -89,7 +89,7 @@ Rules:
 - Names don't repeat their package: `user.Service`, `user.Repository`, `user.NewService`, `handler.Handler` + `handler.New`, `config.DB`. The package's main entity is the exception (`room.Room`, `config.Config`). Core port/service methods drop the entity too: `GetAll`, `GetByID`, `Create`, `UpdateStatus`, `GetDetailsByUserID` (plural for slices). gRPC RPC names (`CreateBooking`) and HTTP handler methods (`h.GetUsers`) keep it, because their package doesn't imply the entity. Core files are `repository.go` / `service.go`; adapter files keep the entity prefix (`postgres/room_repository.go`).
 - One name per field everywhere (REST, gRPC, Kafka, DB), `snake_case` in JSON. Flat structures prefix the owner (`user_phone_number`, `check_in_date`); nested objects drop it (`user.phone_number`, not `user.phone` or `user.user_phone_number`).
 - Status enums are Go `type X string` constants with `IsValid()`, mirrored by Postgres `ENUM` types.
-- Errors are wrapped with context: `fmt.Errorf("failed to ...: %w", err)`.
+- Errors are wrapped with context: `fmt.Errorf("failed to ...: %w", err)`. Log the error value, not its string: `"error", err` / `slog.Any("error", err)`.
 - Config comes from env: `SERVER_PORT`, `GRPC_PORT` (services with a gRPC server), `DB_HOST/PORT/USER/PASSWORD/NAME`, `KAFKA_BROKERS` (comma-separated). `.env.example` is only a template, so identical values across services (like the port) are intentional. The real `.env` is gitignored, local only, and I set it up myself for each service.
 - `main.go` exits with `slog.Error` + `os.Exit(1)` when `config.Load()` or DB init fails.
 - Commit messages look like `[scope] message`, e.g. `[booking svc] http handler and router` or `[UC: create booking] init`.

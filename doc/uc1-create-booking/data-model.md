@@ -68,7 +68,7 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 saga_id        UUID NOT NULL UNIQUE,
 total_amount   BIGINT NOT NULL,     -- snapshot, minor units
 currency       CHAR(3) NOT NULL,    -- snapshot
-nightly_rates  JSONB NOT NULL,      -- snapshot, [{date, price}]
+nightly_rates  JSONB NOT NULL,      -- snapshot, [{"date":"2026-10-25","price":12000}]: date YYYY-MM-DD, price minor units
 CONSTRAINT reservations_no_overlap
     EXCLUDE USING gist (room_id WITH =, daterange(check_in_date, check_out_date, '[)') WITH &&)
     WHERE ("status" IN ('RESERVED', 'CONFIRMED')),
@@ -94,7 +94,7 @@ CONSTRAINT check_dates CHECK (check_in_date < check_out_date)
 | `reservation_id UUID NOT NULL` | reference only |
 | `expires_at TIMESTAMPTZ NOT NULL` | UI countdown while `PENDING`; CreateBooking always sends it |
 | `user_id`, `room_id` UUID (were TEXT); `total_amount` without `DEFAULT` | IDs are UUIDs everywhere; a forgotten total is an error, not 0 |
-| `nightly_rates JSONB NOT NULL` (`[{date, price}]`), no `nightly_rates` table | written once by CreateBooking and read with the booking, never queried by night (same as `reservations.nightly_rates`) |
+| `nightly_rates JSONB NOT NULL` (`[{"date":"2026-10-25","price":12000}]`, date `YYYY-MM-DD` like the proto), no `nightly_rates` table | written once by CreateBooking and read with the booking, never queried by night (same as `reservations.nightly_rates`) |
 | `booking_status` enum | see [state-machines.md](state-machines.md#booking) |
 
 ## Payment (new)

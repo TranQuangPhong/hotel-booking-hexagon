@@ -21,7 +21,7 @@ CREATE TABLE bookings (
 
     total_amount      BIGINT NOT NULL,       -- minor units
     currency          CHAR(3) NOT NULL,
-    nightly_rates     JSONB NOT NULL,        -- snapshot, [{date, price}], minor units
+    nightly_rates     JSONB NOT NULL,        -- snapshot, [{"date":"2026-10-25","price":12000}]: date YYYY-MM-DD, price minor units
 
     status            booking_status NOT NULL,
     payment_status    payment_status NOT NULL,

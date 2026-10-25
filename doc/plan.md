@@ -24,30 +24,24 @@ Done
 - M1 step 7: GRPC_PORT as config.GRPC{Port} (same shape as payment-service); main.go runs the gRPC server next to
   HTTP: recovery handler logs panic + stack and returns INTERNAL (v2's default sends UNKNOWN + stack, logs nothing),
   reflection for grpcurl (dev only), GracefulStop bounded by the 5 s shutdown ctx (context.AfterFunc -> Stop)
+- M1 step 8 (2026-10-26): ReserveRoom tested with grpcurl + DB check: reserve, overlap -> ROOM_UNAVAILABLE, same saga_id ->
+  same reservation_id + prices, zero-night / past check-in -> INVALID_ARGUMENT, unknown room -> NOT_FOUND. Along the way:
+  gRPC access log (logger v1.1.0, grpclogger.UnaryServerInterceptor first in the chain; the handler still logs the INTERNAL
+  cause), nightly_rates JSON date as YYYY-MM-DD like the proto (NightlyRate MarshalJSON / UnmarshalJSON), log errors as
+  the value ("error", err)
 
 UC1 build order (details: doc/uc1-create-booking/README.md section 6)
-- M1: Room ReserveRoom gRPC   <- NOW
-- M2: Booking CreateBooking gRPC (idempotent by saga_id)
+- M1: Room ReserveRoom gRPC (done 2026-10-26)
+- M2: Booking CreateBooking gRPC (idempotent by saga_id)   <- next, after step 9
 - M3: Orchestrator phase A: POST /bookings -> ReserveRoom -> CreateBooking (no Kafka yet)
 - M4: Kafka + outbox poller + phase D (deadline worker -> ReleaseRoom -> ExpireBooking)
 - M5: Payment: CreateCheckoutSession (Stripe hosted page) + Stripe webhook -> PaymentAuthorized
 - M6: Phase C (confirm room -> capture -> confirm booking) + notification consumer
 
-Next step: M1, Room ReserveRoom gRPC   <- resume at step 8 (steps 1-7 done), then step 9 (room admin API, outside M1)
-Not in M1: the orchestrator gRPC client (that is M3). Test with grpcurl
+Next step: step 9 (room admin API, outside M1), then M2 (Booking CreateBooking gRPC)
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
-Before step 8 (if not done yet): re-run the Postman room CRUD. Room DB migrated in place 2026-10-25 (rooms kept, inventories +
-reservations created); rooms 101-104 have no inventories, so test with a new POST /rooms
 
-8. Done when (test room: POST /rooms, no seed SQL)
-    + use a new saga_id for every call except the repeat test: the same saga_id returns the stored hold, even for
-      another room or dates (good-to-have.md G3)
-    + grpcurl reserves
-    + a 2nd overlapping call fails with ROOM_UNAVAILABLE
-    + the same saga_id again returns the same reservation_id and prices
-    + a zero-night stay and a past check-in fail with INVALID_ARGUMENT
-
-9. Room admin API (after step 8, outside M1): inventory edit + hold checks. The races stay accepted (Notes: "Later")
+9. Room admin API (outside M1): inventory edit + hold checks. The races stay accepted (Notes: "Later")
     + core (internal/room)
         + inventory.go
           // DayPatch is an admin edit of inventory days: a nil field keeps the stored value
@@ -125,6 +119,7 @@ Why step 9 (decided 2026-10-25)
   the admin's check), two admin edits on one month (the later batch erases the other's days). One fix: Notes, "Later"
 
 Notes for later milestones
+- M2: when booking moves nightly_rates to JSONB, give booking.NightlyRate the same date-only MarshalJSON/UnmarshalJSON as room
 - M3: ReserveRoom error -> saga
     + definite rejection (NOT_FOUND, INVALID_ARGUMENT, FAILED_PRECONDITION) -> saga FAILED, nothing to release, reply 404 / 400 / 409
     + unknown outcome (timeout, UNAVAILABLE, INTERNAL) -> phase D, reply 503

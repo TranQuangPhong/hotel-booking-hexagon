@@ -37,7 +37,7 @@ Every service uses the same pattern: **`/<service-prefix>/health`** and **`/<ser
 
 | Method | Request | Response | Errors |
 |---|---|---|---|
-| `room.v1.RoomService/ReserveRoom` | `saga_id, room_id, check_in_date, check_out_date, expires_at` | `reservation_id, room_number, room_type, currency, total_amount, nightly_rates[]{date, price}` | `INVALID_ARGUMENT` · `NOT_FOUND` · `FAILED_PRECONDITION` `ROOM_UNAVAILABLE` / `RESERVATION_RELEASED` |
+| `room.v1.RoomService/ReserveRoom` | `saga_id, room_id, check_in_date, check_out_date, expires_at` | `reservation_id, room_number, room_type, currency, total_amount, nightly_rates[]{date YYYY-MM-DD, price}` | `INVALID_ARGUMENT` · `NOT_FOUND` · `FAILED_PRECONDITION` `ROOM_UNAVAILABLE` / `RESERVATION_RELEASED` |
 | `booking.v1.BookingService/CreateBooking` | `saga_id, reservation_id, user{id, name, email, phone_number}, room{id, number, type}, check_in_date, check_out_date, number_of_guests, nightly_rates[], total_amount, currency, expires_at` | `booking_id, status` | `INVALID_ARGUMENT` |
 | `payment.v1.PaymentService/CreateCheckoutSession` | `saga_id, booking_id, amount, currency` | `payment_id, checkout_url` | `UNAVAILABLE` (Stripe) · `FAILED_PRECONDITION` (session no longer open) |
 
