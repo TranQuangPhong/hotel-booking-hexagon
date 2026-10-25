@@ -83,8 +83,7 @@ Work split: I write the main gRPC logic by hand; Claude handles the subtle detai
           200 touched month rows, 400 ErrInvalidInput, 404 ErrNotFound, 409 ErrReserved
         + UpdateRoom: + 404 ErrNotFound (taken over from Cleanup), 409 ErrReserved
     + Docs (same pass): services.md room REST (+ PATCH), data-model.md Room (days change only through it: status / price,
-      never currency or new days), good-to-have.md E4 (holds by construction: the edit takes no currency), Postman,
-      CLAUDE.md Commands: drop "no tests yet" from go test (room-service has unit tests in internal/room)
+      never currency or new days), good-to-have.md E4 (holds by construction: the edit takes no currency), Postman
     + Done when (Postman + grpcurl, test room from a new POST /rooms)
         + PATCH a price from today to 2099-12-31: every existing day from today changes; earlier days of this month
           don't, and no month is added

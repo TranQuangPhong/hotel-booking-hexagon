@@ -33,11 +33,11 @@ A simple hotel booking system, built as Go microservices with **hexagonal archit
 | Service | Status | Store | Notes |
 |---|---|---|---|
 | `user-service` | Done (CRUD APIs tested) | PostgreSQL | Profile only; Cognito handles auth (phase 2) |
-| `room-service` | Room CRUD done; inventory WIP | PostgreSQL (+ Redis lock later) | Rooms, monthly inventory (JSONB days), reservations |
+| `room-service` | Room CRUD done (creating a room opens 12 months of inventory); `ReserveRoom` gRPC done (M1) | PostgreSQL (+ Redis lock later) | Rooms, monthly inventory (JSONB days), reservations |
 | `booking-service` | WIP: model/repo/service, handler partial, `main.go` stub | PostgreSQL | Booking stores user and room **snapshots** plus nightly rates |
 | `orchestrator-service` | Skeleton only | PostgreSQL | `saga_instances` + `saga_message_log` schemas designed |
 | `payment-service` | Skeleton only (config done) | PostgreSQL + Stripe sandbox | |
-| `notification-service` | Skeleton only | MongoDB + AWS SES | |
+| `notification-service` | Skeleton only | None in v1 (logs the notification); MongoDB + AWS SES in phase 2 | v1 is a Kafka consumer only: no HTTP server, no DB |
 
 Key docs:
 - `doc/services.md`: service responsibilities, endpoints, tech stack
@@ -101,7 +101,7 @@ Run from inside a service directory, since each one is a separate module:
 go run ./cmd            # start service (needs .env or env vars)
 go build ./...
 go vet ./...
-go test ./...           # no tests yet
+go test ./...           # unit tests so far: room-service internal/room
 go mod tidy
 ```
 Infra: `infra/postgresql/docker-compose.yml` currently defines only `postgres-booking` (host port 5440). `infra/kafka` and `infra/mongodb` are empty placeholders. Migrations in `db/migration/` are applied by hand.
@@ -114,7 +114,7 @@ My setup:
 
 ## Roadmap
 
-1. **Phase 1, local:** finish service APIs, then implement **UC1 create booking end to end** (orchestrator → room → booking → payment → notify). ← *current focus*: message/event contracts and the orchestrator.
+1. **Phase 1, local:** finish service APIs, then implement **UC1 create booking end to end** (orchestrator → room → booking → payment → notify). ← *current focus*: the UC1 build order M1–M6 (`doc/uc1-create-booking/README.md` section 6). M1 is done; the next step is in `doc/plan.md`.
 2. Local deployment and test of the full flow (no AWS Gateway, Cognito, or Lambda yet).
 3. **Phase 2, AWS:** API Gateway, Cognito (plus a Lambda to sync users), SES, deployment.
 4. CI/CD, monitoring, and logging.
