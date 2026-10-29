@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -37,11 +38,11 @@ func (r *RoomRepository) GetByID(ctx context.Context, id string) (*room.Room, er
 	if err != nil {
 		return nil, err
 	}
-	u, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[room.Room])
+	rm, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[room.Room])
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, room.ErrNotFound
 	}
-	return u, err
+	return rm, err
 }
 
 func (r *RoomRepository) Update(ctx context.Context, rm *room.Room) (*room.Room, error) {
@@ -52,9 +53,18 @@ func (r *RoomRepository) Update(ctx context.Context, rm *room.Room) (*room.Room,
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, room.ErrNotFound
 		}
+		if isUniqueViolation(err) {
+			return nil, fmt.Errorf("room number %q: %w", rm.Number, room.ErrNumberTaken)
+		}
 		return nil, err
 	}
 	return rm, nil
+}
+
+// isUniqueViolation reports a Postgres unique_violation (23505). On rooms the only one a caller can hit is number
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // Create room & inventory for next 1 year
@@ -70,6 +80,9 @@ func (r *RoomRepository) Create(ctx context.Context, rm *room.Room, inventories 
 	 returning id, created_at, updated_at`
 	if err = tx.QueryRow(ctx, sqlRoom, rm.Number, rm.Type, rm.Status).
 		Scan(&rm.ID, &rm.CreatedAt, &rm.UpdatedAt); err != nil {
+		if isUniqueViolation(err) {
+			return nil, fmt.Errorf("room number %q: %w", rm.Number, room.ErrNumberTaken)
+		}
 		return nil, fmt.Errorf("failed to insert room: %w", err)
 	}
 	// Create inventory
@@ -120,6 +133,50 @@ func (r *RoomRepository) GetInventories(ctx context.Context, roomID string, firs
 		return nil, err
 	}
 	return pgx.CollectRows(rows, pgx.RowToAddrOfStructByName[room.Inventory])
+}
+
+func (r *RoomRepository) SaveInventories(ctx context.Context, inventories []*room.Inventory) error {
+	sql := `update inventories set days = $1, updated_at = now()
+	 where id = $2 returning updated_at`
+
+	batch := &pgx.Batch{}
+	for _, inv := range inventories {
+		batch.Queue(sql, inv.Days, inv.ID)
+	}
+
+	results := r.pool.SendBatch(ctx, batch) //implicit txn
+	defer results.Close()
+
+	for _, inv := range inventories {
+		if err := results.QueryRow().Scan(&inv.UpdatedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// nothing deletes inventories, so fail loudly. The other rows still commit: an UPDATE of 0 rows
+				// is no database error, so the batch's implicit transaction doesn't roll back
+				return fmt.Errorf("failed to save inventory %d-%02d: id %d no longer exists", inv.Year, inv.Month, inv.ID)
+			}
+			return fmt.Errorf("failed to save inventory %d-%02d: %w", inv.Year, inv.Month, err)
+		}
+	}
+	if err := results.Close(); err != nil {
+		return fmt.Errorf("failed to close inventory batch: %w", err)
+	}
+	return nil
+}
+
+func (r *RoomRepository) HasReservation(ctx context.Context, roomID string, firstNight, lastNight time.Time) (bool, error) {
+	var exist bool
+	sql := `select exists (
+	select 1 from reservations
+	where room_id = $1
+	and status in ('RESERVED', 'CONFIRMED')
+	and daterange(check_in_date, check_out_date, '[)') && daterange($2, $3, '[]')
+	)`
+
+	err := r.pool.QueryRow(ctx, sql, roomID, firstNight, lastNight).Scan(&exist)
+	if err != nil {
+		return false, fmt.Errorf("failed to check reservation exists: %w", err)
+	}
+	return exist, nil
 }
 
 // nil, nil when the saga has no reservation yet: the normal first call, not an error

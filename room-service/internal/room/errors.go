@@ -9,4 +9,6 @@ import "errors"
 var ErrInvalidInput = errors.New("invalid input")
 var ErrNotFound = errors.New("room not found")
 var ErrReservationReleased = errors.New("reservation already released")
-var ErrRoomUnavailable = errors.New("room unavailable") //overlap, maintain, not active
+var ErrRoomUnavailable = errors.New("room unavailable")      //overlap, maintain, not active
+var ErrReserved = errors.New("conflict, room is being held") // a RESERVED / CONFIRMED hold covers the nights (REST 409)
+var ErrNumberTaken = errors.New("number already taken")      // another room has this number (REST 409)

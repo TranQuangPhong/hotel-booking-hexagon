@@ -22,6 +22,7 @@ func (h *Handler) RoomRouter() *gin.Engine {
 		v1.GET("/:id", h.GetRoomByID)
 		v1.POST("/", h.CreateRoom)
 		v1.PUT("/:id", h.UpdateRoom)
+		v1.PATCH("/:id/inventories", h.UpdateInventories)
 		// v1.DELETE("/:id", h.DeleteRoom) //Optional
 	}
 	return r

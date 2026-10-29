@@ -20,6 +20,7 @@ import (
 
 	logger "github.com/TranQuangPhong/hotel-booking-logger"
 	grpclogger "github.com/TranQuangPhong/hotel-booking-logger/grpclogger"
+	"github.com/gin-gonic/gin"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
@@ -70,6 +71,9 @@ func main() {
 	// inventoryRepository := postgres.NewInventoryRepository(ctx, pool)
 	roomService := room.NewService(roomRepository)
 	roomHander := handler.New(roomService)
+	// process-wide: a JSON field the request type doesn't have (e.g. currency on PATCH .../inventories) is a 400,
+	// not silently dropped
+	gin.EnableJsonDecoderDisallowUnknownFields()
 	router := roomHander.RoomRouter()
 
 	// Start http server

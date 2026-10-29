@@ -51,6 +51,34 @@ func (s DayStatus) IsValid() bool {
 	return false
 }
 
+// DayPatch is an admin edit of inventory days: a nil field keeps the stored value
+type DayPatch struct {
+	Status *DayStatus
+	Price  *int64
+}
+
+// apply sets the patch on every existing day from firstNight to lastNight (inclusive). No I/O
+func (p DayPatch) apply(inventories []*Inventory, firstNight, lastNight time.Time) {
+	if p.Status == nil && p.Price == nil {
+		return // Both nil, keep current values
+	}
+	for _, inv := range inventories {
+		for d, day := range inv.Days {
+			night := time.Date(int(inv.Year), time.Month(inv.Month), int(d), 0, 0, 0, 0, time.UTC)
+			if night.Before(firstNight) || night.After(lastNight) {
+				continue
+			}
+			if p.Status != nil {
+				day.Status = *p.Status
+			}
+			if p.Price != nil {
+				day.Price = *p.Price
+			}
+			inv.Days[d] = day //write the copy back
+		}
+	}
+}
+
 // NewInventories builds inventories for `months` consecutive months, starting at the month of `from` (UTC).
 // Every day is AVAILABLE at `rate`. RoomID is left empty: the caller sets it once the room exists.
 func NewInventories(from time.Time, months int, rate Rate) []*Inventory {

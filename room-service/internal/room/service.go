@@ -61,11 +61,65 @@ func (s *Service) Update(ctx context.Context, room *Room) (*Room, error) {
 	if !room.Status.IsValid() {
 		return nil, fmt.Errorf("%w: room status %q", ErrInvalidInput, room.Status)
 	}
+	if room.Status == Inactive || room.Status == Archived {
+		now := time.Now().UTC()
+		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		maxDay := time.Date(9999, time.December, 31, 0, 0, 0, 0, time.UTC) //9999-12-31
+
+		exist, err := s.repository.HasReservation(ctx, room.ID, today, maxDay)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check reservation status: %w", err)
+		}
+		if exist {
+			return nil, ErrReserved
+		}
+	}
 	newRoom, err := s.repository.Update(ctx, room)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update room: %w", err)
 	}
 	return newRoom, nil
+}
+
+func (s *Service) UpdateInventory(ctx context.Context, roomID string, dayPatch DayPatch, firstNight, lastNight time.Time) ([]*Inventory, error) {
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	if (dayPatch.Status == nil && dayPatch.Price == nil) ||
+		(dayPatch.Status != nil && !dayPatch.Status.IsValid()) ||
+		(dayPatch.Price != nil && *dayPatch.Price <= 0) ||
+		firstNight.Before(today) || firstNight.After(lastNight) {
+		return nil, ErrInvalidInput
+	}
+
+	if _, err := s.repository.GetByID(ctx, roomID); err != nil {
+		return nil, fmt.Errorf("failed to get room: %w", err)
+	}
+
+	if dayPatch.Status != nil && *dayPatch.Status == DayMaintenance {
+		exist, err := s.repository.HasReservation(ctx, roomID, firstNight, lastNight)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check reservation status: %w", err)
+		}
+		if exist {
+			return nil, ErrReserved
+		}
+	}
+
+	inventories, err := s.repository.GetInventories(ctx, roomID, firstNight, lastNight)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get inventories: %w", err)
+	}
+	if len(inventories) == 0 {
+		return []*Inventory{}, nil
+	}
+
+	dayPatch.apply(inventories, firstNight, lastNight)
+	if err = s.repository.SaveInventories(ctx, inventories); err != nil {
+		return nil, fmt.Errorf("failed to save inventories: %w", err)
+	}
+
+	return inventories, nil
 }
 
 // TODO: txn (later phase)
