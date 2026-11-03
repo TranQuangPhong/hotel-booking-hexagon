@@ -96,7 +96,7 @@ func (h *Handler) UpdateInventories(c *gin.Context) {
 		return
 	}
 
-	inventories, err := h.roomSerivce.UpdateInventory(c.Request.Context(), id, req.ToDayPatch(), firstNight, lastNight)
+	inventories, err := h.roomSerivce.UpdateInventories(c.Request.Context(), id, req.ToDayPatch(), firstNight, lastNight)
 	if err != nil {
 		writeError(c, "UpdateInventories failed", err)
 		return

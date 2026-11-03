@@ -30,6 +30,9 @@ import (
 )
 
 func main() {
+	// This process lives in UTC: pgx scans TIMESTAMPTZ in time.Local, and the contracts promise RFC 3339 UTC
+	time.Local = time.UTC
+
 	// 1. Initialize structured logger FIRST
 	log := logger.NewLogger()
 	slog.SetDefault(log)

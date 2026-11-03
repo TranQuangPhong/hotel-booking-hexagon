@@ -45,7 +45,7 @@ func (s *Service) Create(ctx context.Context, room *Room, rate Rate) (*Room, err
 		return nil, fmt.Errorf("%w: rate must have price > 0 and a 3-letter uppercase currency", ErrInvalidInput)
 	}
 
-	inventories := NewInventories(time.Now(), inventoryMonths, rate)
+	inventories := NewInventories(time.Now().UTC(), inventoryMonths, rate)
 
 	newRoom, err := s.repository.Create(ctx, room, inventories)
 	if err != nil {
@@ -81,7 +81,7 @@ func (s *Service) Update(ctx context.Context, room *Room) (*Room, error) {
 	return newRoom, nil
 }
 
-func (s *Service) UpdateInventory(ctx context.Context, roomID string, dayPatch DayPatch, firstNight, lastNight time.Time) ([]*Inventory, error) {
+func (s *Service) UpdateInventories(ctx context.Context, roomID string, dayPatch DayPatch, firstNight, lastNight time.Time) ([]*Inventory, error) {
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
