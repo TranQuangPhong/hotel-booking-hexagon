@@ -8,7 +8,7 @@ import (
 )
 
 // v1 is a Kafka consumer only: no HTTP server, no database.
-// Later: MongoDB notification log (G9), SES (phase 2).
+// Later: MongoDB notification log (G9), SES (phase 3).
 type Config struct {
 	Kafka Kafka
 }

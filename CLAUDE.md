@@ -32,12 +32,12 @@ A simple hotel booking system, built as Go microservices with **hexagonal archit
 
 | Service | Status | Store | Notes |
 |---|---|---|---|
-| `user-service` | Done (CRUD APIs tested) | PostgreSQL | Profile only; Cognito handles auth (phase 2) |
-| `room-service` | Room CRUD done (creating a room opens 12 months of inventory); `ReserveRoom` gRPC done (M1) | PostgreSQL (+ Redis lock later) | Rooms, monthly inventory (JSONB days), reservations |
-| `booking-service` | WIP: model/repo/service, handler partial, `main.go` stub | PostgreSQL | Booking stores user and room **snapshots** plus nightly rates |
+| `user-service` | Done (CRUD APIs tested) | PostgreSQL | Profile only; Cognito handles auth (phase 3) |
+| `room-service` | Room CRUD + inventory edit (`PATCH`) done (creating a room opens 12 months of inventory); `ReserveRoom` gRPC done (M1) | PostgreSQL (+ Redis lock later) | Rooms, monthly inventory (JSONB days), reservations |
+| `booking-service` | WIP (M2 next): model/repo/service, handler partial, `main.go` stub | PostgreSQL | Booking stores user and room **snapshots** plus nightly rates |
 | `orchestrator-service` | Skeleton only | PostgreSQL | `saga_instances` + `saga_message_log` schemas designed |
 | `payment-service` | Skeleton only (config done) | PostgreSQL + Stripe sandbox | |
-| `notification-service` | Skeleton only | None in v1 (logs the notification); MongoDB + AWS SES in phase 2 | v1 is a Kafka consumer only: no HTTP server, no DB |
+| `notification-service` | Skeleton only | None in v1 (logs the notification); MongoDB + AWS SES in phase 3 | v1 is a Kafka consumer only: no HTTP server, no DB |
 
 Key docs:
 - `doc/services.md`: service responsibilities, endpoints, tech stack
@@ -62,7 +62,7 @@ Key docs:
 
 **Repo layout:** one module per service, plus two shared modules in this repo, wired with `replace` directives:
 - `contracts/` (`booking/contracts`): proto + Kafka message definitions, one package per owning service, no infra deps
-- `platform/` (`booking/platform`): shared infra (outbox insert + poller), imported by adapters only
+- `platform/` (`booking/platform`): shared infra (outbox insert + poller), imported by adapters and `cmd/main.go`, never the core
 
 **Hexagonal layout per service** (`<svc>/`, full trees in `doc/hexagonal-structure.md`):
 ```
@@ -84,6 +84,7 @@ Rules:
 - Shared logger: `github.com/TranQuangPhong/hotel-booking-logger`, which is my own library. `slog.SetDefault(logger.NewLogger())` plus `logger.LoggingMiddleware()` in Gin; services with a gRPC server also put `grpclogger.UnaryServerInterceptor()` first in `grpc.ChainUnaryInterceptor` (subpackage `/grpclogger`, v1.1.0+).
 - HTTP: Gin, `gin.New()` + `Recovery` + logging middleware. Routes are `/<prefix>/health` and `/<prefix>/api/v1/...`, with a unique prefix per service (`/users`, `/rooms`, `/bookings`, `/orchestrator`, `/payments`). Versioning lives in code; the gateway (later) only routes and rewrites.
 - DB: `pgx/v5` + `pgxpool`, raw SQL, no ORM. Multi-table writes run in a transaction with `defer tx.Rollback(ctx)`, and bulk inserts use `pgx.Batch`.
+- Timestamps are RFC 3339 UTC on every API and message. Every `main.go` with a DB starts with `time.Local = time.UTC`, so `TIMESTAMPTZ` scans as UTC; a timestamp made in Go uses `time.Now().UTC()`.
 - IDs are UUIDs (`gen_random_uuid()`), handled as `string` in Go.
 - **Money is stored in minor units as `int64`** (cents), with a separate `currency CHAR(3)`.
 - Names don't repeat their package: `user.Service`, `user.Repository`, `user.NewService`, `handler.Handler` + `handler.New`, `config.DB`. The package's main entity is the exception (`room.Room`, `config.Config`). Core port/service methods drop the entity too: `GetAll`, `GetByID`, `Create`, `UpdateStatus`, `GetDetailsByUserID` (plural for slices). gRPC RPC names (`CreateBooking`) and HTTP handler methods (`h.GetUsers`) keep it, because their package doesn't imply the entity. Core files are `repository.go` / `service.go`; adapter files keep the entity prefix (`postgres/room_repository.go`).
@@ -114,11 +115,11 @@ My setup:
 
 ## Roadmap
 
-1. **Phase 1, local:** finish service APIs, then implement **UC1 create booking end to end** (orchestrator → room → booking → payment → notify). ← *current focus*: the UC1 build order M1–M6 (`doc/uc1-create-booking/README.md` section 6). M1 is done; the next step is in `doc/plan.md`.
-2. Local deployment and test of the full flow (no AWS Gateway, Cognito, or Lambda yet).
-3. **Phase 2, AWS:** API Gateway, Cognito (plus a Lambda to sync users), SES, deployment.
-4. CI/CD, monitoring, and logging.
-5. Later optimizations: Redis reservation lock or cache decorator, CDC.
+1. **Phase 1, local:** finish service APIs, then implement **UC1 create booking end to end** (orchestrator → room → booking → payment → notify). ← *current focus*: the UC1 build order M1–M6 (`doc/uc1-create-booking/README.md` section 6). M1 is done; M2 is next (steps in `doc/plan.md`).
+2. **Phase 2, local deployment:** deploy and test the full flow locally (no AWS Gateway, Cognito, or Lambda yet).
+3. **Phase 3, AWS:** API Gateway, Cognito (plus a Lambda to sync users), SES, deployment.
+4. **Phase 4:** CI/CD, monitoring, and logging.
+5. **Phase 5:** later optimizations: Redis reservation lock or cache decorator, CDC.
 
 Decided for UC1 (see `doc/uc1-create-booking/`): shared modules (`contracts/` with protos inside, `platform/`), Kafka topic names, v1 event contracts, booking statuses, `HOLD_TTL` 15 min.
 Undecided or not yet defined: Cancel booking (UC2) and Payment refund (UC3).

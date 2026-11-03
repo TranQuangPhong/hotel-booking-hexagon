@@ -168,14 +168,14 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{room_url}}/api/v1/1f681ffc-36fb-43cb-a349-6bccff9f9aaa",
+              "raw": "{{room_url}}/api/v1/e4454ca2-773f-4750-8658-2703f5447a1c",
               "host": [
                 "{{room_url}}"
               ],
               "path": [
                 "api",
                 "v1",
-                "1f681ffc-36fb-43cb-a349-6bccff9f9aaa"
+                "e4454ca2-773f-4750-8658-2703f5447a1c"
               ]
             }
           },
@@ -188,7 +188,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"number\": \"103\",\r\n    \"type\": \"SUITE\"\r\n}",
+              "raw": "{\r\n    \"number\": \"104\",\r\n    \"type\": \"STANDARD\", //DELUXE, SUITE, STANDARD\r\n    \"price\": 12000,\r\n    \"currency\": \"USD\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -216,7 +216,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\r\n    \"number\": \"101\",\r\n    \"type\": \"STANDARD\",\r\n    \"status\": \"ACTIVE\"\r\n}",
+              "raw": "{\r\n    \"number\": \"104\",\r\n    \"type\": \"STANDARD\",\r\n    \"status\": \"ACTIVE\"\r\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -224,16 +224,58 @@
               }
             },
             "url": {
-              "raw": "{{room_url}}/api/v1/1f681ffc-36fb-43cb-a349-6bccff9f9aaa",
+              "raw": "{{room_url}}/api/v1/e4454ca2-773f-4750-8658-2703f5447a1c",
               "host": [
                 "{{room_url}}"
               ],
               "path": [
                 "api",
                 "v1",
-                "1f681ffc-36fb-43cb-a349-6bccff9f9aaa"
+                "e4454ca2-773f-4750-8658-2703f5447a1c"
               ]
             }
+          },
+          "response": []
+        },
+        {
+          "name": "room update inventories",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// today in UTC, the same \"today\" the service checks: a first_night before it is a 400",
+                  "pm.variables.set(\"today\", new Date().toISOString().slice(0, 10));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"first_night\": \"{{today}}\",\r\n    \"last_night\": \"2099-12-31\",\r\n    \"price\": 15000\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{room_url}}/api/v1/e4454ca2-773f-4750-8658-2703f5447a1c/inventories",
+              "host": [
+                "{{room_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "e4454ca2-773f-4750-8658-2703f5447a1c",
+                "inventories"
+              ]
+            },
+            "description": "Admin edit of the existing inventory days from first_night to last_night (YYYY-MM-DD, both inclusive, first_night not before today UTC). status (AVAILABLE | MAINTENANCE) and price (minor units, in the room's currency) are optional, but at least one is required; a missing field keeps the stored value. Any other field (e.g. currency) is a 400. 200 = the touched month rows ([] when the range has no inventory), 400 = bad input or a malformed id, 404 = unknown room, 409 = MAINTENANCE over a held night."
           },
           "response": []
         }
@@ -267,11 +309,11 @@
   "variable": [
     {
       "key": "user_url",
-      "value": ""
+      "value": "localhost:8081/users"
     },
     {
       "key": "room_url",
-      "value": ""
+      "value": "localhost:8083/rooms"
     }
   ]
 }

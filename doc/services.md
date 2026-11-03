@@ -30,6 +30,7 @@ Details: doc/uc1-create-booking/
     + GET /rooms/api/v1/{id}
     + POST /rooms/api/v1
     + PUT /rooms/api/v1/{id}
+    + PATCH /rooms/api/v1/{id}/inventories   - admin: status / price of the existing days in a date range
 - gRPC
     + ReserveRoom
 - Kafka

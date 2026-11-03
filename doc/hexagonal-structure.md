@@ -21,7 +21,7 @@ hotel-booking-hexagon/
 │   ├── booking/v1/               # owned by booking-service (CreateBooking, ConfirmBooking, BookingConfirmed...)
 │   └── payment/v1/               # owned by payment-service (CreateCheckoutSession, PaymentAuthorized...)
 │
-├── platform/                     # module booking/platform: shared INFRA code, imported by adapters only
+├── platform/                     # module booking/platform: shared INFRA code, imported by adapters and cmd/main.go
 │   ├── go.mod
 │   └── outbox/
 │       ├── outbox.go             # Insert(ctx, tx, envelope): write an outbox row inside the caller's tx
@@ -60,11 +60,13 @@ Later (Docker): the build context must be the repo root so `../contracts` and `.
                  │ internal/<domain>  (CORE)    │   imports: std lib only
                  │ entities, service, ports     │
                  └──────────────────────────────┘
+
+  cmd/main.go ──► booking/platform/outbox (starts the poller)
 ```
 
 1. **The core imports nothing external**: not gin, pgx, grpc or kafka, and **not `booking/contracts` either**. Proto types and Kafka message structs are the service's *external* API, exactly like Gin DTOs. Adapters map them to and from domain types. The cost is a little mapping code; the benefit is that a contract change never ripples into business logic.
 2. **Ports live in the core.** Driven ports are interfaces the core calls (repository, gateway, client). Driving adapters call core services (HTTP handler, gRPC server, Kafka consumer, worker).
-3. **Only adapters import `booking/platform`.**
+3. **Only adapters and `cmd/main.go` import `booking/platform`,** never the core.
 4. **A service imports only the `contracts` packages it needs:** its own `<svc>/v1`, plus `envelope`. Exceptions: the orchestrator imports all of them (it's the coordinator), and notification imports `booking/v1` (to consume `BookingConfirmed`).
 5. **State change + outgoing message = one transaction.** The core tells the repository both what changed and which domain event happened, e.g. `repo.Confirm(ctx, sagaID, event)`. The postgres adapter maps the event to a contracts message and calls `outbox.Insert(ctx, tx, …)` in the same tx. So the core never "publishes" anything, and no `EventPublisher` port or Kafka producer adapter is needed; the platform poller does the publishing.
 
@@ -217,6 +219,7 @@ user-service/
 ├── internal/
 │   ├── user/                         ===== CORE =====
 │   │   ├── user.go
+│   │   ├── errors.go                 # ErrInvalidInput, ErrNotFound, ErrEmailTaken
 │   │   ├── service.go
 │   │   ├── identity.go               # port: IdentityService (Cognito, Phase 3)
 │   │   └── repository.go             # port
@@ -231,7 +234,7 @@ user-service/
 ## 5. `cmd/main.go` shape (services with several entry points)
 
 ```
-load config → pgxpool → repos → gateways/clients → core services
+time.Local = time.UTC → load config → pgxpool → repos → gateways/clients → core services
 → adapters (handler, grpc server, kafka consumer, worker, outbox poller)
 → run each in its own goroutine under one context (errgroup)
 → on SIGINT/SIGTERM: cancel context, graceful stop HTTP + gRPC, wait for all goroutines, close pool

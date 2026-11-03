@@ -19,7 +19,7 @@ CREATE TABLE outbox (
 CREATE INDEX idx_outbox_unpublished ON outbox (id) WHERE published_at IS NULL;
 ```
 
-**Poller** (write it once in `booking/platform/outbox`, parametrized by table name; imported only by adapters):
+**Poller** (write it once in `booking/platform/outbox`, parametrized by table name; imported by adapters and `cmd/main.go`, never the core):
 1. Every ~500 ms, in one tx: `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`.
 2. Produce each row (sync, `acks=all`) → `UPDATE … SET published_at = now()` → commit.
 3. A crash after produce means a re-publish, which consumers handle through the status check.
@@ -85,6 +85,7 @@ CONSTRAINT check_dates CHECK (check_in_date < check_out_date)
 - `inventories.currency` is `CHAR(3)`, like every other currency column.
 - `inventories.days` JSONB: each day becomes `{ "status": "AVAILABLE" | "MAINTENANCE", "price": 12000 }`. Remove `RESERVED` / `BOOKED` / `booking_id`, because occupancy lives only in `reservations`. `currency` stays a column on the row (one currency per room-month), not repeated on every day.
 - Creating a room also creates `inventories` for the current month + next 11 (all days `AVAILABLE`), in the same transaction as the room insert.
+- After that, days change only through `PATCH /rooms/api/v1/{id}/inventories`: the `status` / `price` of days that already exist. It never changes `currency` and never adds a day or a month.
 
 ## Booking
 

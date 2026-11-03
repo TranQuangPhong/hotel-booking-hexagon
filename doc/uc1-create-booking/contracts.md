@@ -95,7 +95,7 @@ Example: [`../Message-definition.json`](../Message-definition.json).
 **Decided (Q2):** there are two shared Go modules **inside this repo**, rather than separate git repos or one module per service:
 
 - **`contracts/`** (`booking/contracts`) holds **definitions only**, with no infra dependencies. It has one package per owning service, each containing the `.proto`, its generated code, and the Kafka `data` structs, plus a shared `envelope/`. Commands belong to the receiver's package and events to the emitter's. A service imports only the packages it needs.
-- **`platform/`** (`booking/platform`) holds shared **infra** code, starting with `outbox/` (Insert + Poller). Only adapters import it.
+- **`platform/`** (`booking/platform`) holds shared **infra** code, starting with `outbox/` (Insert + Poller). Only adapters and `cmd/main.go` import it.
 
 Both are wired with `replace` directives. Full layout and import rules are in [hexagonal-structure.md](../hexagonal-structure.md).
 
