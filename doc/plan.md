@@ -47,14 +47,15 @@ Next step: M2 step 1
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
 
 M2: Booking CreateBooking gRPC
-booking-service predates the UC1 schema: create_tables.sql is right, but the Go code still reads a nightly_rates table, has
-old statuses, and the adapter doesn't implement its port. Same shape as room's M1
+booking-service predates the UC1 schema: create_tables.sql has the right columns, but the Go code still reads a nightly_rates
+table, has old statuses, and the adapter doesn't implement its port. Same shape as room's M1
 
 1. Wiring
     + go.mod: logger v1.1.0 (grpclogger) + replace booking/contracts (hexagonal-structure.md section 1), then go mod tidy.
       booking/platform comes with the outbox in M4. The require comes in step 5, because tidy removes a require nothing
       imports: this line + go mod tidy (PowerShell needs the quotes): go mod edit "-require=booking/contracts@v0.0.0"
     + config: GRPC{Port} from GRPC_PORT, same shape as room; .env.example; your .env needs a port room doesn't use
+    + create_tables.sql: remove the 3 indexes (idx_bookings_user_id, _room_id, _dates): no UC1 query uses them (Why M2)
     + db/migration/drop_all.sql like room's: old nightly_rates first (FK to bookings), bookings, then both enum types.
       Then rebuild the DB from create_tables.sql
 2. Core model (internal/booking)
@@ -75,6 +76,7 @@ old statuses, and the adapter doesn't implement its port. Same shape as room's M
       In the code: one field per line with a db tag = column name, like room (a tag on `ID, SagaID string` applies to both
       names and the scan fails at runtime). RowToAddrOfStructByName needs one field per selected column (21)
       Status constants = the DB enum: remove RESERVED, RESERVATION_FAILED, PAYMENT_FAILED; add StatusExpired (EXPIRED)
+      Remove PaymentStatus.IsTerminal: no caller, same reason as the old port methods (step 3)
     + nightly_rate.go
       type NightlyRate struct { Date time.Time; Price int64 } // a JSONB element: no id, no booking_id
       func (n NightlyRate) MarshalJSON() ([]byte, error)      // same as room: date as YYYY-MM-DD, like the proto
@@ -84,18 +86,22 @@ old statuses, and the adapter doesn't implement its port. Same shape as room's M
       // validate rejects what proto3 lets through: a forgotten field arrives as 0 or "", not as an error. No I/O
       func (b *Booking) validate() error
           ErrInvalidInput: check-in not before check-out, guests <= 0, empty user name / email or room number / type
-          (phone may be empty), currency not 3 uppercase letters, total <= 0, not one rate per night (rates[i].Date =
-          check-in + i days, len = nights), a rate price <= 0, prices don't sum to total
+          (phone may be empty), currency not 3 uppercase letters, not one rate per night (len = nights, rates[i].Date =
+          check-in + i days: compare with Equal, == also compares the Location), a rate price <= 0, prices don't sum to
+          total. The sum also catches a forgotten total (Why M2)
+          The error names the field, never its value: grpclogger writes the gRPC message to the access log, and name,
+          email and phone are personal data (room's %q echoes only IDs and dates)
       booking_test.go: table test like setRates; nightly_rate_test.go: JSON round trip. They compile only after step 3
-      (repository.go, service.go still name Detail); go build ./... stays broken until step 6
+      (repository.go, service.go still name Detail); go build ./... stays broken until step 6. Until then build what is done:
+      go build ./internal/booking (step 3), add ./internal/adapter/postgres (step 4), add ./internal/adapter/grpc (step 5)
 3. Port + service
     + repository.go: replaces the old methods (no UC1 caller; M4 adds Expire, M6 Confirm, by sagaID)
       // GetByID returns ErrNotFound when no booking has this id
       GetByID(ctx context.Context, id string) (*Booking, error)
       // Create inserts the booking and returns the stored row. Idempotent by saga_id: a repeated call returns the
       // existing row as stored, even if the rest of the request differs
-      Create(ctx context.Context, booking *Booking) (*Booking, error)
-    + service.go
+      Create(ctx context.Context, b *Booking) (*Booking, error)
+    + service.go: field bookingRepository -> repository, like room
       func (s *Service) GetByID(ctx context.Context, id string) (*Booking, error)
       // in: filled by the gRPC server, except ID, Status, PaymentStatus, CreatedAt, UpdatedAt (the service sets the
       // statuses, the DB the rest)
@@ -104,6 +110,7 @@ old statuses, and the adapter doesn't implement its port. Same shape as room's M
 4. Postgres adapter (booking_repository.go): rewrite
       func NewBookingRepository(pool *pgxpool.Pool) *BookingRepository // no ctx, like room
       var _ booking.Repository = (*BookingRepository)(nil)
+      Param b, not booking (the old Create): booking *booking.Booking hides the package inside the function
     + GetByID: select the 21 columns, CollectOneRow + RowToAddrOfStructByName; pgx.ErrNoRows -> ErrNotFound
     + Create: insert ... on conflict (saga_id) do nothing returning id, created_at, updated_at
         pgx.ErrNoRows = the insert was skipped: a call with this saga_id committed first, so return the row by saga_id
@@ -126,9 +133,11 @@ old statuses, and the adapter doesn't implement its port. Same shape as room's M
       func toBookingResponse(b *booking.Booking) BookingResponse
     + handler.go: GetBookingByID with parseBookingID + writeError like room (400, 404, else a logged generic 500).
       Pass c.Request.Context(), not c: gin.Context doesn't carry the request's trace_id or its cancel
-    + router.go: /health + GET /:id. GetBookings goes away (Why M2)
+    + router.go: /health + GET /:id. GetBookings goes away (Why M2), and so do the commented-out routes (CreateBooking is
+      gRPC now, the others have no design yet)
 7. cmd/main.go, same as room's: time.Local = time.UTC first, pgxpool.New + Ping, repo -> service -> handler,
-   gRPC server (grpclogger first, recovery, reflection), graceful stop of both. No unknown-fields flag: no JSON body here
+   gRPC server (grpclogger first, recovery, reflection), graceful stop of both. No unknown-fields flag: no JSON body here.
+   Then go mod tidy: the recovery interceptor (go-grpc-middleware/v2) is a new import
 8. Done when (grpcurl + Postman)
     + CreateBooking -> booking_id + PENDING; the same saga_id again -> same booking_id and no new row, even when the
       second request has other valid data
@@ -148,10 +157,13 @@ Why M2 (accepted 2026-11-04)
 - No GetBySagaID port, unlike room: room must see the stored row first (RELEASED -> error), booking has no rule on a
   repeated call
 - validate in the core: proto3 sends a forgotten field as 0 or "", so a forgotten total would be stored as 0
-  (data-model.md: "a forgotten total is an error, not 0")
+  (data-model.md: "a forgotten total is an error, not 0"). The sum check catches it: at least one night, every price > 0,
+  sum = total, so there is no separate total check
 - Phone may be empty: users has no phone column and the X-User-* headers don't require one; "" is stored, no NULL
 - No GET list route: not in contracts.md and no UC1 caller. The old handler read a path param its route doesn't have.
   It comes back with UC2 / the FE
+- No indexes on bookings yet: every UC1 lookup is by id or saga_id (PK, UNIQUE), the same reasoning as reservations in
+  data-model.md. idx_bookings_user_id comes back with the list route
 
 Why (decided 2026-10-12)
 - Price snapshot on the reservation: an admin will be able to change inventory prices, so a repeated call must return what was
@@ -207,6 +219,8 @@ Notes for later milestones
 - M4: envelope.OccurredAt is a plain string: time.Now().UTC().Format(time.RFC3339)
 - Later, Phase 3: the DB URL built with fmt.Sprintf breaks on a password with @, / or # (generated DB passwords), and the
   parse error shows part of it. Fix: url.URL{Scheme: "postgres", User: url.UserPassword(user, password), ...}
+- Later, Phase 3: GET /bookings/api/v1/{id} returns name, email and phone to anyone holding the id, while POST .../payment
+  checks the owner. Add the same check with Cognito: X-User-* headers can be faked, so a check in v1 proves little
 - Later, before production (2026-10-25; was "when the admin inventory-edit API exists"): room lock + Reserve in one tx.
   Closes the step 9 races: a Reserve in flight vs a status change, two admin edits on one month
     + port: RunInTx(ctx context.Context, fn func(txRepo Repository) error) error. The core passes the steps,

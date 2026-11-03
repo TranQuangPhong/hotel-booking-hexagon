@@ -73,11 +73,11 @@ func main() {
 	roomRepository := postgres.NewRoomRepository(pool)
 	// inventoryRepository := postgres.NewInventoryRepository(ctx, pool)
 	roomService := room.NewService(roomRepository)
-	roomHander := handler.New(roomService)
+	roomHandler := handler.New(roomService)
 	// process-wide: a JSON field the request type doesn't have (e.g. currency on PATCH .../inventories) is a 400,
 	// not silently dropped
 	gin.EnableJsonDecoderDisallowUnknownFields()
-	router := roomHander.RoomRouter()
+	router := roomHandler.RoomRouter()
 
 	// Start http server
 	httpServerPort := fmt.Sprintf(":%d", cfg.Server.Port) //Eg ":8182"

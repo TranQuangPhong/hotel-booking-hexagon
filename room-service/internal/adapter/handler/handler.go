@@ -11,15 +11,15 @@ import (
 )
 
 type Handler struct {
-	roomSerivce *room.Service
+	roomService *room.Service
 }
 
 func New(s *room.Service) *Handler {
-	return &Handler{roomSerivce: s}
+	return &Handler{roomService: s}
 }
 
 func (h *Handler) GetRooms(c *gin.Context) {
-	rooms, err := h.roomSerivce.GetAll(c.Request.Context())
+	rooms, err := h.roomService.GetAll(c.Request.Context())
 	if err != nil {
 		writeError(c, "GetRooms failed", err)
 		return
@@ -33,7 +33,7 @@ func (h *Handler) GetRoomByID(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	rm, err := h.roomSerivce.GetByID(c.Request.Context(), id)
+	rm, err := h.roomService.GetByID(c.Request.Context(), id)
 	if err != nil {
 		writeError(c, "GetRoomByID failed", err)
 		return
@@ -48,7 +48,7 @@ func (h *Handler) CreateRoom(c *gin.Context) {
 		return
 	}
 
-	newRoom, err := h.roomSerivce.Create(c.Request.Context(), req.ToRoom(), req.ToRate())
+	newRoom, err := h.roomService.Create(c.Request.Context(), req.ToRoom(), req.ToRate())
 	if err != nil {
 		writeError(c, "CreateRoom failed", err)
 		return
@@ -70,7 +70,7 @@ func (h *Handler) UpdateRoom(c *gin.Context) {
 	}
 	rm := req.ToRoom(id)
 
-	updatedRoom, err := h.roomSerivce.Update(c.Request.Context(), rm)
+	updatedRoom, err := h.roomService.Update(c.Request.Context(), rm)
 	if err != nil {
 		writeError(c, "UpdateRoom failed", err)
 		return
@@ -96,7 +96,7 @@ func (h *Handler) UpdateInventories(c *gin.Context) {
 		return
 	}
 
-	inventories, err := h.roomSerivce.UpdateInventories(c.Request.Context(), id, req.ToDayPatch(), firstNight, lastNight)
+	inventories, err := h.roomService.UpdateInventories(c.Request.Context(), id, req.ToDayPatch(), firstNight, lastNight)
 	if err != nil {
 		writeError(c, "UpdateInventories failed", err)
 		return
