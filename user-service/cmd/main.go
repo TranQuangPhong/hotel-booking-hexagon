@@ -15,10 +15,14 @@ import (
 	"time"
 
 	logger "github.com/TranQuangPhong/hotel-booking-logger"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
+	// This process lives in UTC: pgx scans TIMESTAMPTZ in time.Local, and the contracts promise RFC 3339 UTC
+	time.Local = time.UTC
+
 	// Init logger
 	log := logger.NewLogger()
 	slog.SetDefault(log)
@@ -56,9 +60,11 @@ func main() {
 	defer pool.Close()
 
 	// Init repository, service, handler, router
-	userRepository := postgres.NewUserRepository(ctx, pool)
+	userRepository := postgres.NewUserRepository(pool)
 	userService := user.NewService(userRepository)
 	userHandler := handler.New(userService)
+	// process-wide: a JSON field the request type doesn't have is a 400, not silently dropped
+	gin.EnableJsonDecoderDisallowUnknownFields()
 	router := userHandler.UserRouter()
 
 	// Start http server

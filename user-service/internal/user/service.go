@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 type Service struct {
@@ -30,6 +31,11 @@ func (s *Service) GetByID(ctx context.Context, id string) (*User, error) {
 }
 
 func (s *Service) Create(ctx context.Context, user *User) (*User, error) {
+	if !user.Role.IsValid() {
+		return nil, fmt.Errorf("%w: role %q", ErrInvalidInput, user.Role)
+	}
+	// Stored lowercase, so the UNIQUE column also catches PHONG@GMAIL.COM after phong@gmail.com
+	user.Email = strings.ToLower(user.Email)
 	newUser, err := s.userRepository.Create(ctx, user)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
@@ -38,6 +44,10 @@ func (s *Service) Create(ctx context.Context, user *User) (*User, error) {
 }
 
 func (s *Service) Update(ctx context.Context, user *User) (*User, error) {
+	if !user.Role.IsValid() {
+		return nil, fmt.Errorf("%w: role %q", ErrInvalidInput, user.Role)
+	}
+	user.Email = strings.ToLower(user.Email)
 	newUser, err := s.userRepository.Update(ctx, user)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update user: %w", err)

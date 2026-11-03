@@ -18,7 +18,7 @@ const (
 	RoleUser  Role = "USER"
 )
 
-func (r Role) isValid() bool {
+func (r Role) IsValid() bool {
 	switch r {
 	case RoleAdmin, RoleUser:
 		return true
