@@ -36,6 +36,9 @@ Done
 - UTC timestamps (2026-11-04): user + room main.go start with time.Local = time.UTC; every later service with a DB does too
 - M2 step 1 (2026-11-07): booking-service wiring: logger v1.1.0 + replace contracts/platform, GRPC_PORT config, bookings
   indexes removed, drop_all.sql (bookings + both enums; the old nightly_rates table is dropped by hand once)
+- M2 step 2 (2026-11-07): core model: one Booking (21 db-tagged fields, Detail gone), statuses = DB enum (+ EXPIRED),
+  NightlyRate JSON as YYYY-MM-DD, errors.go, validate (every field rule + one rate per night + sum = total) with a table
+  test and a JSON round-trip test. go build ./... already passes (handler + repository kept compiling)
 
 UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
@@ -45,49 +48,13 @@ UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M5: Payment: CreateCheckoutSession (Stripe hosted page) + Stripe webhook -> PaymentAuthorized
 - M6: Phase C (confirm room -> capture -> confirm booking) + notification consumer
 
-Next step: M2 step 2
+Next step: M2 step 3
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
 
 M2: Booking CreateBooking gRPC
 booking-service predates the UC1 schema: create_tables.sql has the right columns, but the Go code still reads a nightly_rates
 table, has old statuses, and the adapter doesn't implement its port. Same shape as room's M1
 
-2. Core model (internal/booking)
-    + booking.go: one entity, Detail goes away (nightly rates are a column now, read with the row)
-      type Booking struct {
-          ID, SagaID, ReservationID                    string
-          UserID, UserName, UserEmail, UserPhoneNumber string
-          RoomID, RoomNumber, RoomType                 string
-          CheckInDate, CheckOutDate                    time.Time // midnight UTC
-          NumberOfGuests                               int
-          TotalAmount                                  int64
-          Currency                                     string
-          NightlyRates                                 []NightlyRate
-          Status                                       Status
-          PaymentStatus                                PaymentStatus
-          ExpiresAt, CreatedAt, UpdatedAt              time.Time
-      }
-      In the code: one field per line with a db tag = column name, like room (a tag on `ID, SagaID string` applies to both
-      names and the scan fails at runtime). RowToAddrOfStructByName needs one field per selected column (21)
-      Status constants = the DB enum: remove RESERVED, RESERVATION_FAILED, PAYMENT_FAILED; add StatusExpired (EXPIRED)
-      Remove PaymentStatus.IsTerminal: no caller, same reason as the old port methods (step 3)
-    + nightly_rate.go
-      type NightlyRate struct { Date time.Time; Price int64 } // a JSONB element: no id, no booking_id
-      func (n NightlyRate) MarshalJSON() ([]byte, error)      // same as room: date as YYYY-MM-DD, like the proto
-      func (n *NightlyRate) UnmarshalJSON(b []byte) error
-    + errors.go: ErrInvalidInput, ErrNotFound
-    + booking.go
-      // validate rejects what proto3 lets through: a forgotten field arrives as 0 or "", not as an error. No I/O
-      func (b *Booking) validate() error
-          ErrInvalidInput: check-in not before check-out, guests <= 0, empty user name / email or room number / type
-          (phone may be empty), currency not 3 uppercase letters, not one rate per night (len = nights, rates[i].Date =
-          check-in + i days: compare with Equal, == also compares the Location), a rate price <= 0, prices don't sum to
-          total. The sum also catches a forgotten total (Why M2)
-          The error names the field, never its value: grpclogger writes the gRPC message to the access log, and name,
-          email and phone are personal data (room's %q echoes only IDs and dates)
-      booking_test.go: table test like setRates; nightly_rate_test.go: JSON round trip. They compile only after step 3
-      (repository.go, service.go still name Detail); go build ./... stays broken until step 6. Until then build what is done:
-      go build ./internal/booking (step 3), add ./internal/adapter/postgres (step 4), add ./internal/adapter/grpc (step 5)
 3. Port + service
     + repository.go: replaces the old methods (no UC1 caller; M4 adds Expire, M6 Confirm, by sagaID)
       // GetByID returns ErrNotFound when no booking has this id
