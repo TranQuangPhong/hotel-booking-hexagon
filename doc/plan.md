@@ -34,6 +34,8 @@ Done
   writeError: any other error is a logged generic 500. The races stay accepted (Notes: "Later"). Not run end to end:
   inventory endpoints are side functions, integration tested when major use cases involve them (decided 2026-11-04)
 - UTC timestamps (2026-11-04): user + room main.go start with time.Local = time.UTC; every later service with a DB does too
+- M2 step 1 (2026-11-07): booking-service wiring: logger v1.1.0 + replace contracts/platform, GRPC_PORT config, bookings
+  indexes removed, drop_all.sql (bookings + both enums; the old nightly_rates table is dropped by hand once)
 
 UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
@@ -43,21 +45,13 @@ UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M5: Payment: CreateCheckoutSession (Stripe hosted page) + Stripe webhook -> PaymentAuthorized
 - M6: Phase C (confirm room -> capture -> confirm booking) + notification consumer
 
-Next step: M2 step 1
+Next step: M2 step 2
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
 
 M2: Booking CreateBooking gRPC
 booking-service predates the UC1 schema: create_tables.sql has the right columns, but the Go code still reads a nightly_rates
 table, has old statuses, and the adapter doesn't implement its port. Same shape as room's M1
 
-1. Wiring
-    + go.mod: logger v1.1.0 (grpclogger) + replace booking/contracts (hexagonal-structure.md section 1), then go mod tidy.
-      booking/platform comes with the outbox in M4. The require comes in step 5, because tidy removes a require nothing
-      imports: this line + go mod tidy (PowerShell needs the quotes): go mod edit "-require=booking/contracts@v0.0.0"
-    + config: GRPC{Port} from GRPC_PORT, same shape as room; .env.example; your .env needs a port room doesn't use
-    + create_tables.sql: remove the 3 indexes (idx_bookings_user_id, _room_id, _dates): no UC1 query uses them (Why M2)
-    + db/migration/drop_all.sql like room's: old nightly_rates first (FK to bookings), bookings, then both enum types.
-      Then rebuild the DB from create_tables.sql
 2. Core model (internal/booking)
     + booking.go: one entity, Detail goes away (nightly rates are a column now, read with the row)
       type Booking struct {
@@ -116,7 +110,8 @@ table, has old statuses, and the adapter doesn't implement its port. Same shape 
         pgx.ErrNoRows = the insert was skipped: a call with this saga_id committed first, so return the row by saga_id
         (unexported getBySagaID). The insert is the check: no check-then-insert race
         Target (saga_id), unlike room's no target: room must also skip overlaps, here any other conflict is a real error
-5. gRPC server (adapter/grpc/server.go), same shape as room's (require booking/contracts first, step 1)
+5. gRPC server (adapter/grpc/server.go), same shape as room's. First require booking/contracts (tidy removes a require
+   nothing imports, so not earlier): go mod edit "-require=booking/contracts@v0.0.0" (PowerShell needs the quotes), go mod tidy
       type Server struct { bookingv1.UnimplementedBookingServiceServer; svc *booking.Service }
       func New(s *booking.Service) *Server
       func (s *Server) CreateBooking(ctx context.Context, req *bookingv1.CreateBookingRequest) (*bookingv1.CreateBookingResponse, error)

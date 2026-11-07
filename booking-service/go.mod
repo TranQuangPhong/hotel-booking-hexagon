@@ -3,7 +3,7 @@ module booking/booking-service
 go 1.25.5
 
 require (
-	github.com/TranQuangPhong/hotel-booking-logger v1.0.0
+	github.com/TranQuangPhong/hotel-booking-logger v1.1.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/joho/godotenv v1.5.1
@@ -44,4 +44,9 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
+)
+
+replace (
+	booking/contracts => ../contracts
+	booking/platform => ../platform
 )

@@ -32,7 +32,3 @@ CREATE TABLE bookings (
 
     CHECK (check_out_date > check_in_date)
 );
-
-CREATE INDEX idx_bookings_user_id ON bookings(user_id);
-CREATE INDEX idx_bookings_room_id ON bookings(room_id);
-CREATE INDEX idx_bookings_dates   ON bookings(check_in_date, check_out_date);
