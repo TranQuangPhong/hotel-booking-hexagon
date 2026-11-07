@@ -17,7 +17,7 @@ func New(s *booking.Service) *Handler {
 
 func (h *Handler) GetBookings(c *gin.Context) {
 	userID := c.Param("user_id") //TODO: Extract from JWT
-	bookings, err := h.bookingService.GetDetailsByUserID(c, userID)
+	bookings, err := h.bookingService.GetByUserID(c, userID)
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
 		return
@@ -27,7 +27,7 @@ func (h *Handler) GetBookings(c *gin.Context) {
 
 func (h *Handler) GetBookingByID(c *gin.Context) {
 	bookingID := c.Param("id")
-	booking, err := h.bookingService.GetDetailByID(c, bookingID)
+	booking, err := h.bookingService.GetByID(c, bookingID)
 	if err != nil {
 		c.JSON(500, gin.H{"error": fmt.Errorf("%w", err).Error()})
 		return
