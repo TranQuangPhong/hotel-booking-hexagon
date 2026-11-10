@@ -39,6 +39,11 @@ Done
 - M2 step 2 (2026-11-07): core model: one Booking (21 db-tagged fields, Detail gone), statuses = DB enum (+ EXPIRED),
   NightlyRate JSON as YYYY-MM-DD, errors.go, validate (every field rule + one rate per night + sum = total) with a table
   test and a JSON round-trip test. go build ./... already passes (handler + repository kept compiling)
+- M2 steps 3-6 (2026-11-11): port GetByID / GetByUserID / Create (UpdateStatus gone); Create returns the stored *Booking
+  (insert: RETURNING id, created_at, updated_at; saga_id conflict: getBySagaID), and neither service nor repo modifies
+  its argument. gRPC CreateBooking: toBooking maps every field, any non-input error -> logged INTERNAL (no NOT_FOUND).
+  REST: GET /:id only, own BookingResponse + NightlyRateResponse DTO, parseBookingID -> 400, writeError 404 / logged 500.
+  booking.Booking has db tags only. Builds + go test passes; not run yet (needs step 7)
 
 UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
@@ -48,55 +53,13 @@ UC1 build order (details: doc/uc1-create-booking/README.md section 6)
 - M5: Payment: CreateCheckoutSession (Stripe hosted page) + Stripe webhook -> PaymentAuthorized
 - M6: Phase C (confirm room -> capture -> confirm booking) + notification consumer
 
-Next step: M2 step 3
+Next step: M2 step 7 (user writes main.go)
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
 
 M2: Booking CreateBooking gRPC
 booking-service predates the UC1 schema: create_tables.sql has the right columns, but the Go code still reads a nightly_rates
 table, has old statuses, and the adapter doesn't implement its port. Same shape as room's M1
 
-3. Port + service
-    + repository.go: replaces the old methods (no UC1 caller; M4 adds Expire, M6 Confirm, by sagaID)
-      // GetByID returns ErrNotFound when no booking has this id
-      GetByID(ctx context.Context, id string) (*Booking, error)
-      // Create inserts the booking and returns the stored row. Idempotent by saga_id: a repeated call returns the
-      // existing row as stored, even if the rest of the request differs
-      Create(ctx context.Context, b *Booking) (*Booking, error)
-    + service.go: field bookingRepository -> repository, like room
-      func (s *Service) GetByID(ctx context.Context, id string) (*Booking, error)
-      // in: filled by the gRPC server, except ID, Status, PaymentStatus, CreatedAt, UpdatedAt (the service sets the
-      // statuses, the DB the rest)
-      func (s *Service) Create(ctx context.Context, b *Booking) (*Booking, error)
-          validate -> Status = PENDING, PaymentStatus = PENDING -> repository.Create
-4. Postgres adapter (booking_repository.go): rewrite
-      func NewBookingRepository(pool *pgxpool.Pool) *BookingRepository // no ctx, like room
-      var _ booking.Repository = (*BookingRepository)(nil)
-      Param b, not booking (the old Create): booking *booking.Booking hides the package inside the function
-    + GetByID: select the 21 columns, CollectOneRow + RowToAddrOfStructByName; pgx.ErrNoRows -> ErrNotFound
-    + Create: insert ... on conflict (saga_id) do nothing returning id, created_at, updated_at
-        pgx.ErrNoRows = the insert was skipped: a call with this saga_id committed first, so return the row by saga_id
-        (unexported getBySagaID). The insert is the check: no check-then-insert race
-        Target (saga_id), unlike room's no target: room must also skip overlaps, here any other conflict is a real error
-5. gRPC server (adapter/grpc/server.go), same shape as room's. First require booking/contracts (tidy removes a require
-   nothing imports, so not earlier): go mod edit "-require=booking/contracts@v0.0.0" (PowerShell needs the quotes), go mod tidy
-      type Server struct { bookingv1.UnimplementedBookingServiceServer; svc *booking.Service }
-      func New(s *booking.Service) *Server
-      func (s *Server) CreateBooking(ctx context.Context, req *bookingv1.CreateBookingRequest) (*bookingv1.CreateBookingResponse, error)
-          ErrInvalidInput -> INVALID_ARGUMENT with the field; anything else is logged (saga_id, error) -> INTERNAL
-          response: booking_id, status (the stored status on a repeated call)
-      func toBooking(req *bookingv1.CreateBookingRequest) (*booking.Booking, error)
-          uuid.Parse saga_id, reservation_id, user.id, room.id (canonical form); time.DateOnly for the stay and every rate;
-          expires_at CheckValid. A missing user or room is safe: generated getters on a nil message return "", so
-          uuid.Parse fails -> INVALID_ARGUMENT
-6. REST: GET by id only
-    + dto.go
-      // dates as YYYY-MM-DD (contracts.md); no saga_id / reservation_id: internal
-      type BookingResponse struct { ... } // the other fields under their column names
-      func toBookingResponse(b *booking.Booking) BookingResponse
-    + handler.go: GetBookingByID with parseBookingID + writeError like room (400, 404, else a logged generic 500).
-      Pass c.Request.Context(), not c: gin.Context doesn't carry the request's trace_id or its cancel
-    + router.go: /health + GET /:id. GetBookings goes away (Why M2), and so do the commented-out routes (CreateBooking is
-      gRPC now, the others have no design yet)
 7. cmd/main.go, same as room's: time.Local = time.UTC first, pgxpool.New + Ping, repo -> service -> handler,
    gRPC server (grpclogger first, recovery, reflection), graceful stop of both. No unknown-fields flag: no JSON body here.
    Then go mod tidy: the recovery interceptor (go-grpc-middleware/v2) is a new import
@@ -126,6 +89,13 @@ Why M2 (accepted 2026-11-04)
   It comes back with UC2 / the FE
 - No indexes on bookings yet: every UC1 lookup is by id or saga_id (PK, UNIQUE), the same reasoning as reservations in
   data-model.md. idx_bookings_user_id comes back with the list route
+- GetByUserID stays in port + service (2026-11-11), no route: the user's booking history comes back later
+- Create returns the stored *Booking, not (id, status) (2026-11-11): a repeated call must answer the stored status
+  (EXPIRED, BOOKED), and later callers can read more fields without a signature change
+- No layer modifies its argument (2026-11-11): service and repo copy b (nb := *b). Otherwise the caller's b holds the
+  request on one path and the stored row on the other; always use the return value
+- REST has its own DTOs, Booking has no json tags (2026-11-11): NightlyRate's JSON is the JSONB column format, so the
+  API stays the same if the storage changes
 
 Why (decided 2026-10-12)
 - Price snapshot on the reservation: an admin will be able to change inventory prices, so a repeated call must return what was
