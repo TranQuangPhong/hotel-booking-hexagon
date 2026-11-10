@@ -5,40 +5,40 @@ import (
 	"time"
 )
 
-// Map to bookings table in DB
+// Booking maps to the bookings table (db tags). No json tags: REST uses handler.BookingResponse, gRPC its proto
 type Booking struct {
-	ID            string `db:"id" json:"id"`
-	SagaID        string `db:"saga_id" json:"saga_id"`
-	ReservationID string `db:"reservation_id" json:"reservation_id"`
+	ID            string `db:"id"`
+	SagaID        string `db:"saga_id"`
+	ReservationID string `db:"reservation_id"`
 
 	// User snapshot
-	UserID          string `db:"user_id" json:"user_id"`
-	UserName        string `db:"user_name" json:"user_name"`
-	UserEmail       string `db:"user_email" json:"user_email"`
-	UserPhoneNumber string `db:"user_phone_number" json:"user_phone_number"`
+	UserID          string `db:"user_id"`
+	UserName        string `db:"user_name"`
+	UserEmail       string `db:"user_email"`
+	UserPhoneNumber string `db:"user_phone_number"`
 
 	// Room snapshot
-	RoomID     string `db:"room_id" json:"room_id"`
-	RoomNumber string `db:"room_number" json:"room_number"`
-	RoomType   string `db:"room_type" json:"room_type"`
+	RoomID     string `db:"room_id"`
+	RoomNumber string `db:"room_number"`
+	RoomType   string `db:"room_type"`
 
 	// Booking information
-	CheckInDate    time.Time `db:"check_in_date" json:"check_in_date"`   // midnight UTC
-	CheckOutDate   time.Time `db:"check_out_date" json:"check_out_date"` // midnight UTC
-	NumberOfGuests int       `db:"number_of_guests" json:"number_of_guests"`
+	CheckInDate    time.Time `db:"check_in_date"`  // midnight UTC
+	CheckOutDate   time.Time `db:"check_out_date"` // midnight UTC
+	NumberOfGuests int       `db:"number_of_guests"`
 
 	// Money is stored in minor units.
 	// Example: USD 100.25 -> 10025
-	TotalAmount  int64         `db:"total_amount" json:"total_amount"`
-	Currency     string        `db:"currency" json:"currency"`
-	NightlyRates []NightlyRate `db:"nightly_rates" json:"nightly_rates"`
+	TotalAmount  int64         `db:"total_amount"`
+	Currency     string        `db:"currency"`
+	NightlyRates []NightlyRate `db:"nightly_rates"`
 
-	Status        Status        `db:"status" json:"status"`
-	PaymentStatus PaymentStatus `db:"payment_status" json:"payment_status"`
-	ExpiresAt     time.Time     `db:"expires_at" json:"expires_at"`
+	Status        Status        `db:"status"`
+	PaymentStatus PaymentStatus `db:"payment_status"`
+	ExpiresAt     time.Time     `db:"expires_at"`
 
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+	CreatedAt time.Time `db:"created_at"`
+	UpdatedAt time.Time `db:"updated_at"`
 }
 
 // Booking status

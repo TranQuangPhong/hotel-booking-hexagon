@@ -14,7 +14,9 @@ type BookingRepository struct {
 	pool *pgxpool.Pool
 }
 
-func NewBookingRepository(ctx context.Context, pool *pgxpool.Pool) *BookingRepository {
+var _ booking.Repository = (*BookingRepository)(nil)
+
+func NewBookingRepository(pool *pgxpool.Pool) *BookingRepository {
 	return &BookingRepository{pool: pool}
 }
 
@@ -31,14 +33,14 @@ func (r *BookingRepository) GetByID(ctx context.Context, id string) (*booking.Bo
 
 	rows, err := r.pool.Query(ctx, sql, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get booking by ID: %w", err)
 	}
 	b, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[booking.Booking])
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, booking.ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to get booking by ID: %w", err)
+		return nil, fmt.Errorf("failed to collect booking row by ID: %w", err)
 	}
 
 	return b, nil
@@ -57,12 +59,12 @@ func (r *BookingRepository) GetByUserID(ctx context.Context, userID string) ([]*
 
 	rows, err := r.pool.Query(ctx, sql, userID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get booking by user ID: %w", err)
 	}
 	return pgx.CollectRows(rows, pgx.RowToAddrOfStructByName[booking.Booking])
 }
 
-func (r *BookingRepository) GetBySagaID(ctx context.Context, sagaID string) (*booking.Booking, error) {
+func (r *BookingRepository) getBySagaID(ctx context.Context, sagaID string) (*booking.Booking, error) {
 	sql := `select id, saga_id, reservation_id,
 	 user_id, user_name, user_email, user_phone_number,
 	 room_id, room_number, room_type,
@@ -75,21 +77,22 @@ func (r *BookingRepository) GetBySagaID(ctx context.Context, sagaID string) (*bo
 
 	rows, err := r.pool.Query(ctx, sql, sagaID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get booking by saga ID: %w", err)
 	}
 	b, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[booking.Booking])
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, booking.ErrNotFound
 		}
-		return nil, fmt.Errorf("failed to get booking by saga ID: %w", err)
+		return nil, fmt.Errorf("failed to collect booking row by saga ID: %w", err)
 	}
 	return b, nil
 }
 
-// Insert bookings table
-func (r *BookingRepository) Create(ctx context.Context, booking *booking.Booking) (string, error) {
-	const sqlBooking = `
+// Create inserts b and returns the stored row as a new value; b is not modified. Idempotent by saga_id:
+// a repeated call returns the existing row as stored, even if the rest of b differs.
+func (r *BookingRepository) Create(ctx context.Context, b *booking.Booking) (*booking.Booking, error) {
+	const sql = `
 		INSERT INTO bookings (
 			saga_id, reservation_id,
 			user_id, user_name, user_email, user_phone_number,
@@ -104,23 +107,30 @@ func (r *BookingRepository) Create(ctx context.Context, booking *booking.Booking
 			$10, $11, $12,
 			$13, $14, $15,
 			$16, $17, $18
-		) RETURNING id`
-	if err := r.pool.QueryRow(ctx, sqlBooking,
-		booking.SagaID, booking.ReservationID,
-		booking.UserID, booking.UserName, booking.UserEmail, booking.UserPhoneNumber,
-		booking.RoomID, booking.RoomNumber, booking.RoomType,
-		booking.CheckInDate, booking.CheckOutDate, booking.NumberOfGuests,
-		booking.TotalAmount, booking.Currency, booking.NightlyRates,
-		booking.Status, booking.PaymentStatus, booking.ExpiresAt).Scan(&booking.ID); err != nil {
-		return "", fmt.Errorf("failed to insert booking: %w", err)
-	}
-	return booking.ID, nil
-}
+		)
+		ON CONFLICT (saga_id) DO NOTHING
+		RETURNING id, created_at, updated_at`
 
-func (r *BookingRepository) UpdateStatus(ctx context.Context, id string, status booking.Status) error {
-	const sql = `UPDATE bookings SET status = $2, updated_at = NOW() WHERE id = $1`
-	if _, err := r.pool.Exec(ctx, sql, id, status); err != nil {
-		return fmt.Errorf("update status: %w", err)
+	// Copy, so the caller's b keeps what it sent. The rest of the row is what was inserted; the NightlyRates
+	// slice is shared with b, which is fine: nobody writes to it after this point
+	stored := *b
+	err := r.pool.QueryRow(ctx, sql,
+		b.SagaID, b.ReservationID,
+		b.UserID, b.UserName, b.UserEmail, b.UserPhoneNumber,
+		b.RoomID, b.RoomNumber, b.RoomType,
+		b.CheckInDate, b.CheckOutDate, b.NumberOfGuests,
+		b.TotalAmount, b.Currency, b.NightlyRates,
+		b.Status, b.PaymentStatus, b.ExpiresAt).Scan(&stored.ID, &stored.CreatedAt, &stored.UpdatedAt)
+	if err != nil {
+		// No row returned = the insert was skipped: a call with this saga_id committed first
+		if errors.Is(err, pgx.ErrNoRows) {
+			existing, getErr := r.getBySagaID(ctx, b.SagaID)
+			if getErr != nil {
+				return nil, fmt.Errorf("failed to read booking after saga_id conflict: %w", getErr)
+			}
+			return existing, nil
+		}
+		return nil, fmt.Errorf("failed to insert booking: %w", err)
 	}
-	return nil
+	return &stored, nil
 }

@@ -17,11 +17,8 @@ func (h *Handler) BookingRouter() *gin.Engine {
 	})
 	v1 := r.Group("/bookings/api/v1")
 	{
-		v1.GET("/", h.GetBookings)
+		// CreateBooking is gRPC (orchestrator). The list route comes back with UC2 / the FE
 		v1.GET("/:id", h.GetBookingByID)
-		// v1.POST("/:id", h.CreateBooking)
-		// v1.POST("/:id/modify", h.ModifyBooking)
-		// v1.POST("/:id/cancel", h.CancelBooking)
 	}
 
 	return r
