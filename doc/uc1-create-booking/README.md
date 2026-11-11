@@ -64,15 +64,15 @@ flowchart LR
     A["A. Hold<br/>room RESERVED<br/>booking PENDING"] --> B["B. Pay<br/>card authorized<br/>(money held, not taken)"]
     B --> C["C. Confirm<br/>room CONFIRMED<br/>money captured<br/>booking BOOKED"]
     B -. "deadline passed,<br/>no authorization" .-> D["D. Release<br/>room RELEASED<br/>booking EXPIRED"]
-    A -. "gRPC error" .-> D
+    A -. "unknown gRPC outcome" .-> D
 ```
 
-| Phase | Trigger | Result | Saga steps |
+| Phase | Trigger | Result | Saga steps → end status |
 |---|---|---|---|
 | **A. Hold** | `POST /bookings` | room held until `deadline_at`, booking `PENDING` | `RESERVING_ROOM` → `CREATING_BOOKING` → `AWAITING_PAYMENT` |
 | **B. Pay** | `POST /bookings/{id}/payment` + user pays on Stripe's hosted page | card authorized → `PaymentAuthorized` | stays `AWAITING_PAYMENT` |
 | **C. Confirm** | `PaymentAuthorized` | room `CONFIRMED` → payment `CAPTURED` → booking `BOOKED` → notification | `CONFIRMING_ROOM` → `CAPTURING_PAYMENT` → `CONFIRMING_BOOKING` → **COMPLETED** |
-| **D. Release** | deadline worker, or a gRPC error in phase A | room `RELEASED` → booking `EXPIRED` (if it exists) | `RELEASING_ROOM` → `EXPIRING_BOOKING` → **FAILED** |
+| **D. Release** | deadline worker, or an unknown outcome in phase A (a `ReserveRoom` timeout, any `CreateBooking` error). A definite `ReserveRoom` rejection held nothing, so the saga only ends `FAILED` | room `RELEASED` → booking `EXPIRED` (if it exists) | `RELEASING_ROOM` → `EXPIRING_BOOKING` → **FAILED** |
 
 - There is only **one compensation path (D)**, used for both timeout and failure. It works by `sagaId`, so it's safe even when we don't know how far phase A got.
 - A declined card does **not** end the saga. The user can retry on Stripe's page until the deadline.
@@ -105,7 +105,7 @@ The orchestrator stays a separate service, not merged into Booking. Seeing the s
 4. **No DB transaction across a network call** (gRPC, Stripe). Save → call → save the result.
 5. **Money never comes from the client.** Prices come from room inventory.
 6. **Kafka key = `sagaId`.**
-7. **The user comes from the request.** A `UserFromRequest` port reads `X-User-*` headers or a dev JWT in v1; Cognito comes in Phase 3.
+7. **The user comes from the request.** In v1 the orchestrator's HTTP handler reads the `X-User-*` headers ([contracts.md](contracts.md#1-client-rest)) into a user struct and passes it to the core; no port is needed. In Phase 3 a Cognito middleware fills the same struct.
 
 ## 5. Timers
 
@@ -134,7 +134,7 @@ M3–M6 build only the **main line** of each flow. Edge cases wait for M7; the s
 
 M4 comes before M5 on purpose: the first Kafka flow (phase D) needs no Stripe, so you learn outbox and consumers on the simplest case.
 
-## 7. Decisions (confirmed 2026-09-25)
+## 7. Decisions (Q1–Q3 confirmed 2026-09-25)
 
 | # | Question | Decision |
 |---|---|---|

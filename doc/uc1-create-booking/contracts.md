@@ -25,6 +25,8 @@ Every service uses the same pattern: **`/<service-prefix>/health`** and **`/<ser
 | Booking | `GET /bookings/api/v1/{id}` | — | `200` booking | `404` |
 | Payment | `POST /payments/api/v1/webhooks/stripe` | raw body + `Stripe-Signature` | `200` | `400` bad signature |
 
+**User headers** (v1, read by the orchestrator's handler; Cognito replaces them in Phase 3): `X-User-Id` (UUID, else `400`), `X-User-Name`, `X-User-Email`, `X-User-Phone-Number` (may be empty).
+
 **Paying:** the client sends the browser to `checkout_url`, Stripe's hosted payment page. After the payment Stripe redirects to `STRIPE_SUCCESS_URL`, and the client polls `GET` booking until it is `BOOKED` or `EXPIRED`.
 
 **Public vs internal (later, Phase 3):** the client will see one resource-oriented API, for example `POST /api/v1/bookings` routed to the orchestrator and `GET /api/v1/bookings/{id}` routed to booking svc. The API Gateway routes by method + path and rewrites to the internal paths above. In Phase 1 the client calls the internal paths directly.
@@ -52,7 +54,7 @@ Every service uses the same pattern: **`/<service-prefix>/health`** and **`/<ser
 | `booking.commands` | orchestrator | booking-service | `ConfirmBooking`, `ExpireBooking` |
 | `booking.events` | booking | orchestrator-service, notification-service | `BookingConfirmed`, `BookingExpired` |
 
-Key = `saga_id`. Consumers ack and skip any `type` they don't handle.
+Key = `saga_id`. Consumers ack and skip any `type` they don't handle: quietly when it is a known type of the topic (notification and `BookingExpired`), with an error log when it isn't in this file.
 
 ## 4. Messages (13)
 

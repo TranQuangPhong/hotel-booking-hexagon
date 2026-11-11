@@ -4,7 +4,7 @@ Details: doc/uc1-create-booking/
 0. Communication
 - Client -> Orchestrator: REST
 - Orchestrator -> Room / Booking / Payment: gRPC (before payment, user is waiting)
-- Orchestrator <-> Room / Booking / Payment: Kafka cmd -> reply event (after payment)
+- Orchestrator <-> Room / Booking / Payment: Kafka cmd -> reply event (after payment, and for compensation)
 - Every Kafka msg goes through an outbox table (same DB tx as the state change)
 - Kafka client: franz-go; a failed handler is called again with the same message
 
@@ -68,7 +68,7 @@ Details: doc/uc1-create-booking/
 - Send notification email
 - Kafka
     + event (subscribe): BookingConfirmed
-- Techstack: Golang + MongoDB (log every notification) + AWS SES (later)
+- Techstack: Golang; v1 = a log line only. MongoDB (log every notification) + AWS SES: later (G9)
 
 7. Orchestrator
 - Saga coordinator: calls services, sends commands, reacts to events

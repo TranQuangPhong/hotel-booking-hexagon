@@ -50,7 +50,7 @@ In the code the table below is one pure function, `transition(status, step, inpu
 | `CREATING_BOOKING` | ok | save bookingId | `AWAITING_PAYMENT` |
 | `CREATING_BOOKING` | any gRPC error (the room is held) | outbox `ReleaseRoom`, `failure_reason = PHASE_A_ERROR` | `RELEASING_ROOM` |
 | `RESERVING_ROOM`, `CREATING_BOOKING`, `AWAITING_PAYMENT` | deadline worker | outbox `ReleaseRoom`, `failure_reason = DEADLINE` | `RELEASING_ROOM` |
-| `AWAITING_PAYMENT` | `POST …/payment` | call CreateCheckoutSession, save paymentId (gRPC error: reply `503` / `409`, save nothing) | *(same)* |
+| `AWAITING_PAYMENT` | `POST …/payment` (any other step: `409 BOOKING_NOT_PAYABLE`) | call CreateCheckoutSession, save paymentId (gRPC error: reply `503` / `409`, save nothing) | *(same)* |
 | `AWAITING_PAYMENT` | `PaymentAuthorized` | outbox `ConfirmReservation` | `CONFIRMING_ROOM` |
 | `CONFIRMING_ROOM` | `ReservationConfirmed` | outbox `CapturePayment` | `CAPTURING_PAYMENT` |
 | `CAPTURING_PAYMENT` | `PaymentCaptured` | outbox `ConfirmBooking` | `CONFIRMING_BOOKING` |
@@ -125,7 +125,7 @@ stateDiagram-v2
 | PaymentIntent `canceled` | `CANCELLED` |
 
 - `CAPTURE_FAILED` only after a definite refusal from Stripe. A timeout, 429 or 5xx is retried, and the payment stays `AUTHORIZED` meanwhile.
-- `CANCELLED`: the authorization arrived after the hold was released, so it was voided (M7). A payment that stays `CREATED` needs nothing: its session expires by itself.
+- `CANCELLED`: the authorization arrived after the hold was released, so it was voided (M7). A payment that stays `CREATED` because the user never paid needs nothing: its session expires by itself. One that stays `CREATED` because the webhook was missed is G13.
 
 ---
 

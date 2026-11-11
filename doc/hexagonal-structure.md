@@ -95,9 +95,9 @@ orchestrator-service/
 ├── config/config.go                  # UC1: + ROOM / BOOKING / PAYMENT_GRPC_ADDR, GRPC_TIMEOUT, PAYMENT_GRPC_TIMEOUT, HOLD_TTL, DEADLINE_POLL
 ├── internal/
 │   ├── saga/                         ===== CORE =====
-│   │   ├── saga.go                   # Saga entity, Step + Status enums, context      (was state.go)
+│   │   ├── saga.go                   # Saga entity, Step + Status enums, context, User (filled by the handler from X-User-* headers)
 │   │   ├── transitions.go            # UC1: the transition table as a pure function: transition(status, step, input) -> Outcome
-│   │   ├── service.go                # UC1: StartBooking, StartPayment, OnEvent, ExpireOverdue   (was orchestrator.go)
+│   │   ├── service.go                # UC1: StartBooking, StartPayment, OnEvent, ExpireOverdue
 │   │   ├── repository.go             # UC1 port: saga.Repository (Create, GetByID, GetByBookingID, Save(saga, commands), GetOverdue)
 │   │   └── participants.go           # UC1 ports: RoomClient, BookingClient, PaymentClient (sync calls)
 │   │
@@ -111,7 +111,7 @@ orchestrator-service/
 │       │   └── deadline.go           # UC1: every DEADLINE_POLL -> service.ExpireOverdue
 │       └── postgres/
 │           └── saga_repository.go    # UC1: saga_instances + outbox. Save = version guard + commands in one tx
-│                                     #      (producer.go goes away: the platform poller publishes)
+│                                     #      (no producer: the platform poller publishes)
 ├── db/migration/
 └── go.mod                            # + replace contracts, platform
 ```
@@ -157,7 +157,7 @@ booking-service/
 │   ├── booking/                      ===== CORE =====
 │   │   ├── booking.go                # Booking, statuses (PENDING, BOOKED, EXPIRED, …)
 │   │   ├── nightly_rate.go
-│   │   ├── repository.go             # port (+ UC1: UpdateStatus, AddEvent by sagaID)
+│   │   ├── repository.go             # port (+ UC1: GetBySagaID, UpdateStatus, AddEvent)
 │   │   └── service.go                # Create (idempotent by sagaID), UC1: Confirm, Expire
 │   │
 │   └── adapter/

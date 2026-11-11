@@ -32,8 +32,8 @@ Usecase 1: Complete booking order (sync)
             + Update payment record -> AUTHORIZED, save PSP payment intent id
             + Return 200 to PSP
         - Publish PaymentAuthorized event -> orchestrator consumes
-    - Notify client
-    - Generate invoice
+    - Notify client (v1: notification svc logs a line on BookingConfirmed; email = later)
+    - Generate invoice (later, out of UC1 scope)
 
 Special cases:
 Late payment vs expired hold

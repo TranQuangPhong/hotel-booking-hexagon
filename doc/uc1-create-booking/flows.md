@@ -128,12 +128,12 @@ sequenceDiagram
 - Order: **room first** (make sure we have it), **then take the money**, **then** mark the booking.
 - `ConfirmReservation` can't fail in v1: only the orchestrator releases holds, and it can't be releasing and confirming the same saga at once (every saga write is guarded by its `version`).
 - If Stripe rejects the capture, Payment replies `PaymentCaptureFailed`, and the orchestrator marks the saga FAILED and logs it for a manual fix (automatic handling = G10). Only a definite refusal counts: HTTP 400 / 402 / 404 and the PaymentIntent is not `succeeded`. A timeout, 429 or 5xx is an error the consumer loop retries.
-- A repeated capture needs no idempotency key: a PaymentIntent can be captured only once, and when Stripe refuses a second capture the PaymentIntent's status `succeeded` means "already captured".
+- A repeated capture needs no idempotency key: a PaymentIntent can be captured only once, and when Stripe refuses a second capture the PaymentIntent's status `succeeded` means "already captured". This check is part of the main line (M6): without it a crash between Stripe's capture and our update would fail on every retry.
 - If `PaymentAuthorized` arrives after the release (the saga is in `RELEASING_ROOM` or `EXPIRING_BOOKING`, also when already `FAILED` there), it is never captured: the orchestrator sends `CancelPayment`, and Payment voids the authorization (`AUTHORIZED` → `CANCELLED`). There is no reply and no saga step.
 
 ---
 
-## Phase D: release (deadline or phase A error)
+## Phase D: release (deadline or unknown outcome in phase A)
 
 ```mermaid
 sequenceDiagram
@@ -176,6 +176,6 @@ flowchart TD
 
 - **Conditional update, no row lock.** "Still as read" is `status = <from>` for a participant and `version = <the version read>` for the saga (then `version + 1`). The update and its outbox row are one transaction inside one repository method. If 0 rows change, the handler returns an error and the consumer loop calls it again from the read.
 - **Commit the offset after the DB commit.** A crash between the two means the message comes again, and the status check turns the duplicate into a no-op.
-- **A failed handler is called again with the same record** (wait 1 s, doubling up to 30 s). Not committing is not a retry: the client would simply hand over the next record. An error no retry can fix (bad JSON, unknown type, saga not found) is logged and skipped.
+- **A failed handler is called again with the same record** (wait 1 s, doubling up to 30 s). Not committing is not a retry: the client would simply hand over the next record. An error no retry can fix (bad JSON, a type that isn't in the contracts, saga not found) is logged as an error and skipped. A known type the consumer has no use for (notification gets every `BookingExpired`) is skipped quietly.
 - **No row** is a normal case for the release commands: `ReleaseRoom` and `ExpireBooking` reply success with a null ID. For the confirm commands it is only logged.
 - Handlers that call Stripe (`CapturePayment`, `CancelPayment`) check the status first, call Stripe **outside** any transaction, then do the write above.

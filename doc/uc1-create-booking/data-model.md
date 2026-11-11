@@ -36,7 +36,7 @@ No inbox tables in v1: the status check makes handlers idempotent (G5).
 
 | Column | Change | Why |
 |---|---|---|
-| `user_id TEXT NOT NULL` | add | owner check on `POST …/payment` |
+| `user_id UUID NOT NULL` | add | owner check on `POST …/payment`. The handler rejects an `X-User-Id` that isn't a UUID with `400` before the insert |
 | `deadline_at TIMESTAMPTZ NOT NULL` | add | set at saga start (`now + HOLD_TTL`) |
 | `reservation_id` | `TEXT` → `UUID` | |
 | `payment_id UUID` | done (was `payment_intent_id TEXT`) | the orchestrator knows our payment ID, not Stripe's |
