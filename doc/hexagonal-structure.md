@@ -23,12 +23,14 @@ hotel-booking-hexagon/
 │
 ├── platform/                     # module booking/platform: shared INFRA code, imported by adapters and cmd/main.go
 │   ├── go.mod
-│   └── outbox/
-│       ├── outbox.go             # Insert(ctx, tx, envelope): write an outbox row inside the caller's tx
-│       └── poller.go             # Poller: unpublished rows -> Kafka -> published_at
+│   ├── outbox/
+│   │   ├── outbox.go             # Insert(ctx, tx, Message{ID, Topic, Key, Payload}): one outbox row inside the caller's tx
+│   │   └── poller.go             # Poller: unpublished rows -> Kafka -> published_at
+│   └── kafka/
+│       └── consumer.go           # Run(ctx, client, handler): poll -> call the handler until it succeeds -> commit (franz-go)
 │
 ├── user-service/  room-service/  booking-service/  orchestrator-service/  payment-service/  notification-service/
-├── infra/                        # docker-compose: postgres, kafka (UC1 M4), mongodb (later)
+├── infra/                        # docker-compose: postgres, kafka (UC1 M4a), mongodb (later)
 └── doc/
 ```
 
@@ -61,14 +63,15 @@ Later (Docker): the build context must be the repo root so `../contracts` and `.
                  │ entities, service, ports     │
                  └──────────────────────────────┘
 
-  cmd/main.go ──► booking/platform/outbox (starts the poller)
+  cmd/main.go ──► booking/platform/outbox (starts the poller), booking/platform/kafka (runs the consumer loop)
 ```
 
 1. **The core imports nothing external**: not gin, pgx, grpc or kafka, and **not `booking/contracts` either**. Proto types and Kafka message structs are the service's *external* API, exactly like Gin DTOs. Adapters map them to and from domain types. The cost is a little mapping code; the benefit is that a contract change never ripples into business logic.
 2. **Ports live in the core.** Driven ports are interfaces the core calls (repository, gateway, client). Driving adapters call core services (HTTP handler, gRPC server, Kafka consumer, worker).
 3. **Only adapters and `cmd/main.go` import `booking/platform`,** never the core.
 4. **A service imports only the `contracts` packages it needs:** its own `<svc>/v1`, plus `envelope`. Exceptions: the orchestrator imports all of them (it's the coordinator), and notification imports `booking/v1` (to consume `BookingConfirmed`).
-5. **State change + outgoing message = one transaction.** The core tells the repository both what changed and which domain event happened, e.g. `repo.Confirm(ctx, sagaID, event)`. The postgres adapter maps the event to a contracts message and calls `outbox.Insert(ctx, tx, …)` in the same tx. So the core never "publishes" anything, and no `EventPublisher` port or Kafka producer adapter is needed; the platform poller does the publishing.
+5. **State change + outgoing message = one transaction, inside one port method.** The core reads the row, decides, and tells the repository both what changes and which domain event happened, e.g. `repo.UpdateReservationStatus(ctx, sagaID, from, to, event)`. The postgres adapter runs `UPDATE … WHERE status = from` (a conditional update, no row lock), maps the event to a contracts message and calls `outbox.Insert(ctx, tx, …)` in the same tx. It returns `false` when 0 rows changed. So the core never "publishes" anything, and no `EventPublisher` port, Kafka producer adapter or `RunInTx` port is needed; the platform poller does the publishing.
+6. **Outgoing messages are mapped in `adapter/postgres`** (it writes the outbox row); `adapter/kafka` maps incoming messages only. Otherwise one adapter would import another. Domain events are core types (`room.Event`), because the core can't import `contracts`.
 
 ## 3. Adapter vocabulary (same names in every service)
 
@@ -76,9 +79,9 @@ Later (Docker): the build context must be the repo root so `../contracts` and `.
 |---|---|---|
 | `adapter/handler/` | driving | Gin REST: `router.go`, `handler.go`, `dto.go` (DTO ↔ domain) |
 | `adapter/grpc/` | driving | gRPC server: implements `contracts/<svc>/v1` server, maps proto ↔ domain |
-| `adapter/kafka/` | driving | consumer: envelope → domain call; `mapper.go` for message ↔ domain event |
+| `adapter/kafka/` | driving | consumer: envelope → domain call, run by `platform/kafka`; `mapper.go` maps incoming messages to domain inputs |
 | `adapter/worker/` | driving | time-triggered jobs (deadline worker) |
-| `adapter/postgres/` | driven | repositories; writes outbox rows in the same tx |
+| `adapter/postgres/` | driven | repositories; maps outgoing domain events to envelope + contracts message and writes the outbox row in the same tx |
 | `adapter/grpcclient/` | driven | calls other services' gRPC (orchestrator only) |
 | `adapter/<vendor>/` | driven | third-party SDKs: `stripe/`, `cognito/`, `ses/` |
 
@@ -89,13 +92,13 @@ Later (Docker): the build context must be the repo root so `../contracts` and `.
 ```
 orchestrator-service/
 ├── cmd/main.go                       # wire + start: REST, Kafka consumer, outbox poller, deadline worker
-├── config/config.go
+├── config/config.go                  # UC1: + ROOM / BOOKING / PAYMENT_GRPC_ADDR, GRPC_TIMEOUT, PAYMENT_GRPC_TIMEOUT, HOLD_TTL, DEADLINE_POLL
 ├── internal/
 │   ├── saga/                         ===== CORE =====
 │   │   ├── saga.go                   # Saga entity, Step + Status enums, context      (was state.go)
-│   │   ├── transitions.go            # UC1: the transition table: (step, input) -> action + next step
+│   │   ├── transitions.go            # UC1: the transition table as a pure function: transition(status, step, input) -> Outcome
 │   │   ├── service.go                # UC1: StartBooking, StartPayment, OnEvent, ExpireOverdue   (was orchestrator.go)
-│   │   ├── repository.go             # UC1 port: saga.Repository (Create, GetForUpdate, Save(saga, commands))
+│   │   ├── repository.go             # UC1 port: saga.Repository (Create, GetByID, GetByBookingID, Save(saga, commands), GetOverdue)
 │   │   └── participants.go           # UC1 ports: RoomClient, BookingClient, PaymentClient (sync calls)
 │   │
 │   └── adapter/
@@ -103,11 +106,11 @@ orchestrator-service/
 │       ├── grpcclient/               # UC1: implements RoomClient / BookingClient / PaymentClient
 │       ├── kafka/
 │       │   ├── consumer.go           # *.events -> service.OnEvent
-│       │   └── mapper.go             # UC1: envelope <-> domain event / command
+│       │   └── mapper.go             # UC1: envelope -> domain input
 │       ├── worker/
 │       │   └── deadline.go           # UC1: every DEADLINE_POLL -> service.ExpireOverdue
 │       └── postgres/
-│           └── saga_repository.go    # UC1: saga_instances + saga_message_log (= outbox)
+│           └── saga_repository.go    # UC1: saga_instances + outbox. Save = version guard + commands in one tx
 │                                     #      (producer.go goes away: the platform poller publishes)
 ├── db/migration/
 └── go.mod                            # + replace contracts, platform
@@ -154,7 +157,7 @@ booking-service/
 │   ├── booking/                      ===== CORE =====
 │   │   ├── booking.go                # Booking, statuses (PENDING, BOOKED, EXPIRED, …)
 │   │   ├── nightly_rate.go
-│   │   ├── repository.go             # port (+ UC1: Confirm, Expire by sagaID)
+│   │   ├── repository.go             # port (+ UC1: UpdateStatus, AddEvent by sagaID)
 │   │   └── service.go                # Create (idempotent by sagaID), UC1: Confirm, Expire
 │   │
 │   └── adapter/
@@ -174,22 +177,22 @@ payment-service/
 ├── config/config.go                  # + GRPC_PORT, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_SUCCESS_URL
 ├── internal/
 │   ├── payment/                      ===== CORE =====
-│   │   ├── payment.go                # Payment, status enum (CREATED, AUTHORIZED, CAPTURED, CAPTURE_FAILED)
-│   │   ├── gateway.go                # port: PaymentGateway (CreateCheckout, GetCheckout, Capture); Stripe is one implementation
+│   │   ├── payment.go                # Payment, status enum (CREATED, AUTHORIZED, CAPTURED, CAPTURE_FAILED; M7: CANCELLED)
+│   │   ├── gateway.go                # port: Gateway (CreateCheckout, GetCheckout, Capture; M7: Cancel); Stripe is one implementation
 │   │   ├── repository.go             # port
-│   │   └── service.go                # CreateCheckout, MarkAuthorized (from webhook), Capture
+│   │   └── service.go                # CreateCheckout, MarkAuthorized (from webhook), Capture; M7: Cancel
 │   │
 │   └── adapter/
 │       ├── grpc/server.go            # CreateCheckoutSession
 │       ├── handler/                  # POST /payments/api/v1/webhooks/stripe (verify signature -> MarkAuthorized)
 │       ├── kafka/                    # payment.commands consumer + mapper
-│       ├── stripe/gateway.go         # implements PaymentGateway (stripe-go)
+│       ├── stripe/gateway.go         # implements payment.Gateway (stripe-go)
 │       └── postgres/payment_repository.go
 ├── db/migration/
 └── go.mod
 ```
 
-The `PaymentGateway` port is where hexagonal pays off: the core never sees a Stripe type, and a fake gateway makes the service testable without the network.
+The `payment.Gateway` port is where hexagonal pays off: the core never sees a Stripe type, and a fake gateway makes the service testable without the network.
 
 ### notification-service (new, v1 = log only)
 

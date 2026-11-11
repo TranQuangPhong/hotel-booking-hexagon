@@ -35,14 +35,14 @@ A simple hotel booking system, built as Go microservices with **hexagonal archit
 | `user-service` | Done (CRUD APIs tested) | PostgreSQL | Profile only; Cognito handles auth (phase 3) |
 | `room-service` | Room CRUD + inventory edit (`PATCH`) done (creating a room opens 12 months of inventory); `ReserveRoom` gRPC done (M1) | PostgreSQL (+ Redis lock later) | Rooms, monthly inventory (JSONB days), reservations |
 | `booking-service` | WIP (M2 next): model/repo/service, handler partial, `main.go` stub | PostgreSQL | Booking stores user and room **snapshots** plus nightly rates |
-| `orchestrator-service` | Skeleton only | PostgreSQL | `saga_instances` + `saga_message_log` schemas designed |
+| `orchestrator-service` | Skeleton only | PostgreSQL | `saga_instances` schema designed; it gets the same `outbox` table as the other services |
 | `payment-service` | Skeleton only (config done) | PostgreSQL + Stripe sandbox | |
 | `notification-service` | Skeleton only | None in v1 (logs the notification); MongoDB + AWS SES in phase 3 | v1 is a Kafka consumer only: no HTTP server, no DB |
 
 Key docs:
 - `doc/services.md`: service responsibilities, endpoints, tech stack
 - `doc/use-cases.md`: UC1 create booking, which includes the payment request. UC2 is cancel booking, UC3 is payment refund.
-- `doc/uc1-create-booking/`: **detailed UC1 design, the source of truth** (lean v1: flows, saga/entity state machines, REST/gRPC/Kafka contracts, schema deltas, build order M1–M6; cut items live in `good-to-have.md`, so don't pull them into v1 work)
+- `doc/uc1-create-booking/`: **detailed UC1 design, the source of truth** (lean v1: flows, saga/entity state machines, REST/gRPC/Kafka contracts, schema deltas, build order M1–M7; cut items live in `good-to-have.md`, so don't pull them into v1 work)
 - `doc/architecture_uc_create_order.excalidraw`: one-page UC1 picture (keep in sync with `uc1-create-booking/`). `architecture_saga_deprecated.excalidraw` is outdated, so don't use it.
 - `doc/hexagonal-structure.md`: target folder layout per service
 - `doc/Message-definition.json`: example Kafka message envelope, v1 (message_id, type, saga_id, producer, occurred_at, data); fields explained in `uc1-create-booking/contracts.md`
@@ -58,11 +58,13 @@ Key docs:
 - Stripe webhook → **Payment svc** → `PaymentAuthorized` event → orchestrator
 - After payment: **sequential** Kafka command → reply event: ConfirmReservation → CapturePayment (Stripe manual capture) → ConfirmBooking → `BookingConfirmed` (notification subscribes)
 - One compensation path (deadline or phase-A error): ReleaseRoom → ExpireBooking, looked up by `sagaId`
+- A payment authorized after the release is voided (`CancelPayment`, M7); the Stripe session expires 31 min after it is created
 - Every Kafka message goes through a transactional **outbox**; handlers are idempotent by checking the current status
+- Handlers write with a **conditional update**, not a row lock: participants `WHERE status = <as read>`, the saga `WHERE version = <as read>`; 0 rows changed means run the handler again
 
 **Repo layout:** one module per service, plus two shared modules in this repo, wired with `replace` directives:
 - `contracts/` (`booking/contracts`): proto + Kafka message definitions, one package per owning service, no infra deps
-- `platform/` (`booking/platform`): shared infra (outbox insert + poller), imported by adapters and `cmd/main.go`, never the core
+- `platform/` (`booking/platform`): shared infra (outbox insert + poller, Kafka consumer loop), imported by adapters and `cmd/main.go`, never the core
 
 **Hexagonal layout per service** (`<svc>/`, full trees in `doc/hexagonal-structure.md`):
 ```
@@ -91,7 +93,9 @@ Rules:
 - One name per field everywhere (REST, gRPC, Kafka, DB), `snake_case` in JSON. Flat structures prefix the owner (`user_phone_number`, `check_in_date`); nested objects drop it (`user.phone_number`, not `user.phone` or `user.user_phone_number`).
 - Status enums are Go `type X string` constants with `IsValid()`, mirrored by Postgres `ENUM` types.
 - Errors are wrapped with context: `fmt.Errorf("failed to ...: %w", err)`. Log the error value, not its string: `"error", err` / `slog.Any("error", err)`.
-- Config comes from env: `SERVER_PORT`, `GRPC_PORT` (services with a gRPC server), `DB_HOST/PORT/USER/PASSWORD/NAME`, `KAFKA_BROKERS` (comma-separated). `.env.example` is only a template, so identical values across services (like the port) are intentional. The real `.env` is gitignored, local only, and I set it up myself for each service.
+- Config comes from env: `SERVER_PORT`, `GRPC_PORT` (services with a gRPC server), `DB_HOST/PORT/USER/PASSWORD/NAME`, `KAFKA_BROKERS` (comma-separated). The orchestrator adds `ROOM_GRPC_ADDR`, `BOOKING_GRPC_ADDR`, `PAYMENT_GRPC_ADDR`, `GRPC_TIMEOUT`, `PAYMENT_GRPC_TIMEOUT`, `HOLD_TTL`, `DEADLINE_POLL` (durations like `15m`, read with `time.ParseDuration`). `.env.example` is only a template, so identical values across services (like the port) are intentional. The real `.env` is gitignored, local only, and I set it up myself for each service.
+- Kafka: `franz-go` (`kgo`). Consumers use the shared loop in `platform/kafka`: a handler returns nil when the message is done and an error to be called again with the same record; the offset is committed only after nil.
+- Stripe calls carry no fixed `Idempotency-Key`: a repeated call is made safe by the state (one payment row per saga, a PaymentIntent is captured once).
 - `main.go` exits with `slog.Error` + `os.Exit(1)` when `config.Load()` or DB init fails.
 - Commit messages look like `[scope] message`, e.g. `[booking svc] http handler and router` or `[UC: create booking] init`.
 
@@ -115,11 +119,11 @@ My setup:
 
 ## Roadmap
 
-1. **Phase 1, local:** finish service APIs, then implement **UC1 create booking end to end** (orchestrator → room → booking → payment → notify). ← *current focus*: the UC1 build order M1–M6 (`doc/uc1-create-booking/README.md` section 6). M1 is done; M2 is next (steps in `doc/plan.md`).
+1. **Phase 1, local:** finish service APIs, then implement **UC1 create booking end to end** (orchestrator → room → booking → payment → notify). ← *current focus*: the UC1 build order M1–M7 (`doc/uc1-create-booking/README.md` section 6; M3–M6 build the main line only, M7 hardens). M1 is done; M2 is next (steps in `doc/plan.md`).
 2. **Phase 2, local deployment:** deploy and test the full flow locally (no AWS Gateway, Cognito, or Lambda yet).
 3. **Phase 3, AWS:** API Gateway, Cognito (plus a Lambda to sync users), SES, deployment.
 4. **Phase 4:** CI/CD, monitoring, and logging.
 5. **Phase 5:** later optimizations: Redis reservation lock or cache decorator, CDC.
 
-Decided for UC1 (see `doc/uc1-create-booking/`): shared modules (`contracts/` with protos inside, `platform/`), Kafka topic names, v1 event contracts, booking statuses, `HOLD_TTL` 15 min.
+Decided for UC1 (see `doc/uc1-create-booking/`): shared modules (`contracts/` with protos inside, `platform/`), Kafka topic names, v1 event contracts, booking statuses, `HOLD_TTL` 15 min, conditional updates instead of row locks, franz-go, no fixed Stripe idempotency key.
 Undecided or not yet defined: Cancel booking (UC2) and Payment refund (UC3).

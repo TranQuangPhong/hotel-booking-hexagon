@@ -20,7 +20,7 @@ sequenceDiagram
     C->>O: POST /bookings (user headers) roomId, checkInDate, checkOutDate, guests
     Note over O: INSERT saga IN_PROGRESS / RESERVING_ROOM<br/>deadline_at = now + HOLD_TTL, context = user + request
     O->>R: ReserveRoom(sagaId, roomId, checkInDate, checkOutDate, expiresAt = deadline_at)
-    Note over R: read inventory prices (every night AVAILABLE?)<br/>INSERT reservation RESERVED<br/>(exclusion constraint blocks overlaps)
+    Note over R: room ACTIVE? dates valid? every night AVAILABLE?<br/>read inventory prices, INSERT reservation RESERVED<br/>(exclusion constraint blocks overlaps)
     alt room not available
         R-->>O: FAILED_PRECONDITION ROOM_UNAVAILABLE
         Note over O: saga FAILED (nothing to undo)
@@ -43,6 +43,8 @@ sequenceDiagram
 
 Any `CreateBooking` error goes to phase D, because the room is already held.
 
+`ReserveRoom` itself checks the room (it exists and is `ACTIVE`), the dates (check-in before check-out, not in the past) and the inventory of every night. It is idempotent by `saga_id`: a repeated call returns the stored hold and its prices.
+
 Each `Note` over O is its own short transaction, and no transaction stays open during a gRPC call. If the orchestrator crashes mid-phase, the saga keeps its `deadline_at`, so the **deadline worker** releases whatever was held (phase D).
 
 ---
@@ -61,7 +63,7 @@ sequenceDiagram
     Note over O: load saga by bookingId<br/>check owner, step = AWAITING_PAYMENT, now < deadline_at
     O->>P: CreateCheckoutSession(sagaId, bookingId, amount, currency)
     Note over P: payment for sagaId exists? yes: retrieve its session, return the same URL
-    P->>S: create Checkout Session (capture_method=manual, metadata.saga_id, Idempotency-Key = sagaId)
+    P->>S: create Checkout Session (capture_method=manual, metadata.saga_id, expires_at = now + 31 min)
     S-->>P: cs_id, url
     Note over P: INSERT payment CREATED (psp_session_id = cs_id)
     P-->>O: paymentId, checkoutUrl
@@ -80,12 +82,13 @@ sequenceDiagram
 ```
 
 - **Hosted page, not an embedded form.** The user pays on Stripe's own page (a Checkout Session). Our services only pass a URL, and no `client_secret` or card data goes through them.
-- Session parameters: `mode=payment`, cards only (`allowed_payment_method_types=card`, or `payment_method_types=card` if your stripe-go version doesn't have it; without it the page offers every method enabled in the Stripe dashboard), one line item (`amount`, `currency`, and a required product name such as `Booking <bookingId>`), `payment_intent_data.capture_method=manual`, `payment_intent_data.metadata.saga_id`, and `success_url` from config (`STRIPE_SUCCESS_URL`, with `{BOOKING_ID}` replaced). v1 sets no `cancel_url` and no `expires_at`.
+- Session parameters: `mode=payment`, cards only (`allowed_payment_method_types=card`, or `payment_method_types=card` if your stripe-go version doesn't have it; without it the page offers every method enabled in the Stripe dashboard), one line item (`amount`, `currency`, and a required product name such as `Booking <bookingId>`), `payment_intent_data.capture_method=manual`, `payment_intent_data.metadata.saga_id`, `success_url` from config (`STRIPE_SUCCESS_URL`, with `{BOOKING_ID}` replaced), and `expires_at` = now + 31 min (Stripe's minimum is 30 min; 1 min spare for clock difference). v1 sets no `cancel_url`.
+- **No fixed `Idempotency-Key`.** Stripe saves the first answer per key, a 5xx included, and returns it again for 24 h or more, so a retry with that key can never succeed; and the same key with another `expires_at` is rejected. A session whose answer was lost was never shown to the user and expires by itself. `payments.saga_id UNIQUE` keeps one row per saga: if two calls arrive at once, the second insert conflicts and returns the stored row's session.
 - Stripe creates the PaymentIntent only when the user submits the card. So the payment row starts with a session ID and no intent ID; the webhook finds the row through `metadata.saga_id` and saves the `pi_…` ID that `CapturePayment` needs.
 - A repeated call (page refresh, user comes back) retrieves the session from Stripe by `psp_session_id` and returns its URL again, so we store IDs only. Stripe only returns a URL while the session is open. If there is none (the user already paid, even when the webhook hasn't arrived yet), Payment answers `FAILED_PRECONDITION` and the orchestrator replies `409 BOOKING_NOT_PAYABLE`.
 - A failed `CreateCheckoutSession` never moves the saga: the client gets `503` (Stripe down, timeout) or `409`, the saga stays in `AWAITING_PAYMENT`, and the client may call again until the deadline. Only phase A errors go to phase D.
-- The session isn't tied to `deadline_at`: Stripe keeps it open for 24 h by default (30 min minimum), longer than `HOLD_TTL`. A payment made after the deadline is ignored (see phase C and E5).
-- Locally, `stripe listen --forward-to localhost:<port>/payments/api/v1/webhooks/stripe` delivers webhooks and prints the signing secret.
+- The session isn't tied to `deadline_at`: it expires 31 min after its own creation, so it can stay open after the hold expired. A payment made after the release is voided (see phase C and E5).
+- Locally, `stripe listen --latest --forward-to localhost:<port>/payments/api/v1/webhooks/stripe` delivers webhooks and prints the signing secret. `--latest` matters: stripe-go rejects an event whose API version differs from the SDK's.
 - A duplicate webhook finds the payment already `AUTHORIZED` → return 200 and do nothing (rule 3). An event without our `saga_id` (for example from `stripe trigger`) also gets 200 and is ignored.
 
 ---
@@ -109,7 +112,7 @@ sequenceDiagram
     R-)O: ReservationConfirmed
     Note over O: CAPTURING_PAYMENT + outbox CapturePayment
     O-)P: CapturePayment
-    P->>S: capture PaymentIntent (Idempotency-Key = sagaId-capture)
+    P->>S: capture PaymentIntent
     S-->>P: succeeded
     Note over P: payment AUTHORIZED to CAPTURED + outbox PaymentCaptured
     P-)O: PaymentCaptured
@@ -123,9 +126,10 @@ sequenceDiagram
 ```
 
 - Order: **room first** (make sure we have it), **then take the money**, **then** mark the booking.
-- `ConfirmReservation` can't fail in v1: only the orchestrator releases holds, and it can't be releasing and confirming the same saga at once (row lock on the saga).
-- If Stripe rejects the capture, Payment replies `PaymentCaptureFailed`, and the orchestrator marks the saga FAILED and logs it for a manual fix (automatic handling = G10).
-- If `PaymentAuthorized` arrives after the deadline, the saga is no longer in `AWAITING_PAYMENT`, so it's ignored and never captured.
+- `ConfirmReservation` can't fail in v1: only the orchestrator releases holds, and it can't be releasing and confirming the same saga at once (every saga write is guarded by its `version`).
+- If Stripe rejects the capture, Payment replies `PaymentCaptureFailed`, and the orchestrator marks the saga FAILED and logs it for a manual fix (automatic handling = G10). Only a definite refusal counts: HTTP 400 / 402 / 404 and the PaymentIntent is not `succeeded`. A timeout, 429 or 5xx is an error the consumer loop retries.
+- A repeated capture needs no idempotency key: a PaymentIntent can be captured only once, and when Stripe refuses a second capture the PaymentIntent's status `succeeded` means "already captured".
+- If `PaymentAuthorized` arrives after the release (the saga is in `RELEASING_ROOM` or `EXPIRING_BOOKING`, also when already `FAILED` there), it is never captured: the orchestrator sends `CancelPayment`, and Payment voids the authorization (`AUTHORIZED` → `CANCELLED`). There is no reply and no saga step.
 
 ---
 
@@ -139,8 +143,8 @@ sequenceDiagram
     participant R as Room svc
     participant B as Booking svc
 
-    Note over W: every DEADLINE_POLL, SELECT … FOR UPDATE SKIP LOCKED:<br/>step IN (RESERVING_ROOM, CREATING_BOOKING, AWAITING_PAYMENT)<br/>AND deadline_at < now()
-    Note over W: tx: COMPENSATING / RELEASING_ROOM + outbox ReleaseRoom
+    Note over W: every DEADLINE_POLL, SELECT (no lock):<br/>status IN_PROGRESS, step IN (RESERVING_ROOM, CREATING_BOOKING, AWAITING_PAYMENT)<br/>AND deadline_at < now()
+    Note over W: tx, only if the saga's version is unchanged:<br/>COMPENSATING / RELEASING_ROOM + outbox ReleaseRoom
     W-)R: ReleaseRoom (by sagaId)
     Note over R: reservation RESERVED to RELEASED (none? nothing to do)<br/>+ outbox RoomReleased
     R-)O: RoomReleased
@@ -159,16 +163,19 @@ Both commands are looked up **by `sagaId`**, and "no row" is a valid success. Th
 
 ```mermaid
 flowchart TD
-    M["Kafka message"] --> T["BEGIN tx"]
-    T --> L["SELECT row by sagaId FOR UPDATE<br/>(orchestrator: the saga, participant: its entity)"]
+    M["Kafka message"] --> L["read row by sagaId, no lock<br/>(orchestrator: the saga, participant: its entity)"]
     L --> X{"current status?"}
-    X -- "already target" --> RE["outbox: success reply again<br/>(orchestrator: nothing)"]
-    X -- "allowed from" --> U["UPDATE status (+ step, context)"] --> OB["outbox: reply / next command"]
+    X -- "already target" --> RE["tx: outbox success reply again<br/>(orchestrator: nothing)"]
+    X -- "allowed from" --> U["tx: UPDATE ... WHERE still as read<br/>+ outbox reply / next command"]
     X -- "anything else" --> IG["log ignored"]
-    RE --> CM["COMMIT, then ack Kafka offset"]
-    OB --> CM
+    U -- "0 rows: another writer was first" --> L
+    U -- "1 row" --> CM["commit the Kafka offset"]
+    RE --> CM
     IG --> CM
 ```
 
-- **Ack after commit.** A crash between the two means the message comes again, and the status check turns the duplicate into a no-op.
-- Handlers that call Stripe (`CapturePayment`) check the status first, call Stripe with an idempotency key **outside** the transaction, then run the transaction above.
+- **Conditional update, no row lock.** "Still as read" is `status = <from>` for a participant and `version = <the version read>` for the saga (then `version + 1`). The update and its outbox row are one transaction inside one repository method. If 0 rows change, the handler returns an error and the consumer loop calls it again from the read.
+- **Commit the offset after the DB commit.** A crash between the two means the message comes again, and the status check turns the duplicate into a no-op.
+- **A failed handler is called again with the same record** (wait 1 s, doubling up to 30 s). Not committing is not a retry: the client would simply hand over the next record. An error no retry can fix (bad JSON, unknown type, saga not found) is logged and skipped.
+- **No row** is a normal case for the release commands: `ReleaseRoom` and `ExpireBooking` reply success with a null ID. For the confirm commands it is only logged.
+- Handlers that call Stripe (`CapturePayment`, `CancelPayment`) check the status first, call Stripe **outside** any transaction, then do the write above.

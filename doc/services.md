@@ -6,6 +6,7 @@ Details: doc/uc1-create-booking/
 - Orchestrator -> Room / Booking / Payment: gRPC (before payment, user is waiting)
 - Orchestrator <-> Room / Booking / Payment: Kafka cmd -> reply event (after payment)
 - Every Kafka msg goes through an outbox table (same DB tx as the state change)
+- Kafka client: franz-go; a failed handler is called again with the same message
 
 1. AWS API gateway (later)
 - Route client requests to services
@@ -52,13 +53,14 @@ Details: doc/uc1-create-booking/
 
 5. Payment service
 - Payment record, integrate PSP (Stripe)
-- Create checkout session (Stripe hosted page, client is redirected), receive webhook, capture payment
+- Create checkout session (Stripe hosted page, client is redirected), receive webhook, capture payment, void an
+  authorization that arrives after the hold was released
 - REST
     + POST /payments/api/v1/webhooks/stripe    - Stripe calls it
 - gRPC
     + CreateCheckoutSession
 - Kafka
-    + cmd:   CapturePayment
+    + cmd:   CapturePayment, CancelPayment
     + event: PaymentAuthorized, PaymentCaptured, PaymentCaptureFailed
 - Techstack: Golang + PostgreSQL + Stripe (sandbox)
 
@@ -75,7 +77,7 @@ Details: doc/uc1-create-booking/
     + POST /orchestrator/api/v1/bookings                  - create booking (hold room)
     + POST /orchestrator/api/v1/bookings/{id}/payment     - start payment
 - Kafka
-    + cmd (send):      ConfirmReservation, ReleaseRoom, CapturePayment, ConfirmBooking, ExpireBooking
+    + cmd (send):      ConfirmReservation, ReleaseRoom, CapturePayment, CancelPayment, ConfirmBooking, ExpireBooking
     + event (consume): PaymentAuthorized, ReservationConfirmed, RoomReleased, PaymentCaptured, PaymentCaptureFailed, BookingConfirmed, BookingExpired
 - Techstack: Golang + PostgreSQL
 

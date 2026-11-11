@@ -32,7 +32,6 @@ Usecase 1: Complete booking order (sync)
             + Update payment record -> AUTHORIZED, save PSP payment intent id
             + Return 200 to PSP
         - Publish PaymentAuthorized event -> orchestrator consumes
-    - Update inventory
     - Notify client
     - Generate invoice
 
@@ -40,8 +39,9 @@ Special cases:
 Late payment vs expired hold
     + Every reservation has a timeout (expires_at)
     + Orchestrator is the single owner of the timeout: saga deadline = reservation.expires_at
-        -> on deadline (v1): ReleaseRoom -> ExpireBooking. A payment authorized after that is ignored, never captured
-        -> later (G1, G14): expire the checkout session at PSP first; if payment already authorized -> continue confirm path
+        -> on deadline (v1): ReleaseRoom -> ExpireBooking. The checkout session expires by itself 31 min after it was
+           created; a payment authorized after the release is voided (CancelPayment), never captured
+        -> later (G1, G14): expire the checkout session at PSP at the deadline; if payment already authorized -> continue confirm path
     + Room svc sweeper = safety net only (longer TTL than the saga deadline) -> later (G6)
     + Stripe capture_method=manual (authorize -> confirm room -> capture)
         -> confirm fails => cancel authorization (no refund, no fee) -> later (G6); in v1 confirm can't fail

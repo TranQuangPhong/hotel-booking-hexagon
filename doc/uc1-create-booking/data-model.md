@@ -2,9 +2,9 @@
 
 These are **deltas** against the current migrations, written as sketches. You write the real migrations.
 
-## Outbox (Room, Booking, Payment)
+## Outbox (Orchestrator, Room, Booking, Payment)
 
-The orchestrator uses its `saga_message_log` as the outbox instead (see below).
+The same table, with the same name, in every service that sends messages.
 
 ```sql
 CREATE TABLE outbox (
@@ -19,10 +19,14 @@ CREATE TABLE outbox (
 CREATE INDEX idx_outbox_unpublished ON outbox (id) WHERE published_at IS NULL;
 ```
 
-**Poller** (write it once in `booking/platform/outbox`, parametrized by table name; imported by adapters and `cmd/main.go`, never the core):
+**Insert**: `outbox.Insert(ctx, tx, Message{ID, Topic, Key, Payload})` writes one row inside the caller's transaction. `Payload` is the envelope as JSON bytes, so `platform` never imports `contracts`.
+
+**Poller** (written once in `booking/platform/outbox`; imported by adapters and `cmd/main.go`, never the core):
 1. Every ~500 ms, in one tx: `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`.
-2. Produce each row (sync, `acks=all`) → `UPDATE … SET published_at = now()` → commit.
+2. Produce each row (franz-go `ProduceSync`; `acks=all` is its default) → `UPDATE … SET published_at = now()` for the rows that were sent → commit. The produce call gets a timeout, because the tx holds the row locks while the broker is down.
 3. A crash after produce means a re-publish, which consumers handle through the status check.
+
+This poller is the only place that uses a row lock; handlers use a conditional update ([flows.md](flows.md#shape-of-every-message-handler)).
 
 No inbox tables in v1: the status check makes handlers idempotent (G5).
 
@@ -36,7 +40,8 @@ No inbox tables in v1: the status check makes handlers idempotent (G5).
 | `deadline_at TIMESTAMPTZ NOT NULL` | add | set at saga start (`now + HOLD_TTL`) |
 | `reservation_id` | `TEXT` → `UUID` | |
 | `payment_id UUID` | done (was `payment_intent_id TEXT`) | the orchestrator knows our payment ID, not Stripe's |
-| `version` | drop (optional) | all writes use `SELECT … FOR UPDATE` |
+| `version` | keep | every write is `UPDATE … WHERE version = <the version read>`, then `version + 1`; 0 rows changed = another writer was first |
+| `failure_reason TEXT` | add | NULL while `IN_PROGRESS`; then `ROOM_REJECTED`, `PHASE_A_ERROR`, `DEADLINE` or `CAPTURE_FAILED`. The `reason` of `ReleaseRoom` / `ExpireBooking` is read from it |
 
 ```sql
 CREATE INDEX idx_saga_deadline ON saga_instances (deadline_at)
@@ -45,17 +50,7 @@ CREATE INDEX idx_saga_deadline ON saga_instances (deadline_at)
 
 `context` JSONB: user snapshot, room snapshot, dates, guests, nightly rates, total, currency. It holds everything needed to build the next call.
 
-`saga_message_log` becomes the orchestrator's **outbox** (OUT rows only in v1):
-
-| Column | Change |
-|---|---|
-| `message_id UUID NOT NULL UNIQUE` | add |
-| `topic TEXT NOT NULL` | add |
-| `published_at TIMESTAMPTZ` | add |
-| `"type"` | ENUM → `TEXT` + `CHECK` (grows with every use case) |
-| `correlation_id` / `causation_id` | make nullable or drop for now (G7) |
-
-Logging IN rows for audit is G8.
+`saga_message_log` is **not part of v1**: the orchestrator gets the same `outbox` table as the other services, so one poller fits all four. Its migration file goes away. An audit log of every message is G8.
 
 ## Room
 
@@ -101,7 +96,7 @@ CONSTRAINT check_dates CHECK (check_in_date < check_out_date)
 ## Payment (new)
 
 ```sql
-CREATE TYPE payment_state AS ENUM ('CREATED', 'AUTHORIZED', 'CAPTURED', 'CAPTURE_FAILED');
+CREATE TYPE payment_state AS ENUM ('CREATED', 'AUTHORIZED', 'CAPTURED', 'CAPTURE_FAILED', 'CANCELLED');  -- CANCELLED: M7
 
 CREATE TABLE payments (
     id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -120,6 +115,8 @@ CREATE TABLE payments (
 - Stripe creates the PaymentIntent when the user pays on the hosted page, so `psp_payment_intent_id` is unknown at insert time.
 - The webhook finds the row by `saga_id` (sent to Stripe as PaymentIntent metadata), not by a Stripe ID.
 - Neither the page URL nor any Stripe secret is stored.
+- `saga_id UNIQUE` is what makes a repeated `CreateCheckoutSession` safe (no Stripe idempotency key): the second insert conflicts and the stored row's session is returned.
+- `CANCELLED`: an authorization that arrived after the hold was released, voided at Stripe.
 
 ## Notification
 

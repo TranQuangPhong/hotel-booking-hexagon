@@ -45,13 +45,19 @@ Done
   REST: GET /:id only, own BookingResponse + NightlyRateResponse DTO, parseBookingID -> 400, writeError 404 / logged 500.
   booking.Booking has db tags only. Builds + go test passes; not run yet (needs step 7)
 
-UC1 build order (details: doc/uc1-create-booking/README.md section 6)
+UC1 build order (main line of each flow first, decided 2026-11-11; done-when per milestone: uc1 README.md section 6)
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
 - M2: Booking CreateBooking gRPC (idempotent by saga_id)   <- NOW, steps below
-- M3: Orchestrator phase A: POST /bookings -> check headers + body (Notes) -> ReserveRoom -> CreateBooking (no Kafka yet)
-- M4: Kafka + outbox poller + phase D (deadline worker -> ReleaseRoom -> ExpireBooking)
-- M5: Payment: CreateCheckoutSession (Stripe hosted page) + Stripe webhook -> PaymentAuthorized
+- M3: Orchestrator phase A: saga migration + core + Save; POST /bookings -> ReserveRoom -> CreateBooking -> 201.
+  No outbox, no Kafka
+- M4a: infra/kafka, platform outbox (Insert + Poller) + consumer loop, errgroup main.go; deadline worker -> ReleaseRoom
+  -> RoomReleased
+- M4b: ExpireBooking -> BookingExpired -> saga FAILED
+- M5: Payment: CreateCheckoutSession (Stripe hosted page, session expires after 31 min) + Stripe webhook -> PaymentAuthorized
 - M6: Phase C (confirm room -> capture -> confirm booking) + notification consumer
+- M7: hardening: phase A error -> phase D at once, request checks (400), capture rejected, void a late authorization;
+  then good-to-have.md
+- Rule for M3-M6: an edge case met on the way gets one line under M7 (Notes), not code
 
 Next step: M2 step 7 (user writes main.go)
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
@@ -72,7 +78,7 @@ table, has old statuses, and the adapter doesn't implement its port. Same shape 
     + GET by id: stay and rate dates are YYYY-MM-DD, expires_at / created_at end in Z, no saga_id; unknown id -> 404,
       malformed -> 400
     + go test ./... passes
-    + Docs (same pass): CLAUDE.md status row, naming example (GetDetailsByUserID, UpdateStatus), go test line (+ booking-service
+    + Docs (same pass): CLAUDE.md status row, naming example (GetDetailsByUserID; keep UpdateStatus: the M4b booking port has it again), go test line (+ booking-service
       internal/booking); contracts.md GET by id errors (+ 400 malformed id) and user.phone_number (may be empty); flows.md
       phase A (CreateBooking also takes reservationId + currency; rates live in the row); services.md and
       hexagonal-structure.md (no list route, errors.go); Postman (booking_url + booking get by id)
@@ -96,6 +102,47 @@ Why M2 (accepted 2026-11-04)
   request on one path and the stored row on the other; always use the return value
 - REST has its own DTOs, Booking has no json tags (2026-11-11): NightlyRate's JSON is the JSONB column format, so the
   API stays the same if the storage changes
+
+Why design review (decided 2026-11-11; signatures are in Notes for later milestones)
+- Thin milestones (M3-M6 = the main line only, M7 = hardening): after 7 weeks room + booking were polished while the
+  orchestrator, payment, outbox and Kafka (the learning goals) were still stubs. M4 was the biggest milestone, so it is split
+- Handlers use a conditional update, not SELECT ... FOR UPDATE: read without a lock -> the core decides -> one repository
+  method does "UPDATE ... WHERE <still as read> + outbox row" in one tx. 0 rows changed = another writer was first: return
+  an error and the consumer loop calls the handler again. The tx stays inside one port method, so no RunInTx and no
+  GetForUpdate port; RunInTx is only for the room lock (Later)
+- The saga is guarded by version, participants by status: POST .../payment saves payment_id while the step stays
+  AWAITING_PAYMENT, so with a step guard a deadline worker that read the saga earlier would write its old copy back and
+  erase payment_id. Keep saga_instances.version (data-model.md wanted to drop it). A participant's guard is its status
+  column; the same UPDATE may set more (booking: payment_status, payment: psp_payment_intent_id)
+- Deadline worker: a plain SELECT of overdue sagas, each one through Save; a second instance gets ErrStale and skips.
+  FOR UPDATE SKIP LOCKED stays in the outbox poller only
+- Kafka client: franz-go (pure Go; confluent-kafka-go needs cgo + a C toolchain on Windows)
+- The consumer loop calls the handler again with the same record until it succeeds. Not committing is not a retry: the
+  client keeps its read position in memory, so the loop still gets the next record, and committing that later record
+  also marks the failed one as done. An uncommitted record comes back only when its partition is read again from the
+  committed offset: after a restart, or when a rebalance gives the partition to another member
+- The consumer loop is shared in platform/kafka, against "repeat over share": 5 services need the same loop and a wrong
+  copy loses messages silently
+- One outbox table in every service, the orchestrator too; saga_message_log is dropped from v1: its columns don't fit a
+  shared poller (no msg_key, a direction, an enum type) and its audit rows are G8 anyway
+- Outgoing messages are mapped in adapter/postgres (it writes the outbox row); adapter/kafka maps incoming ones only.
+  Otherwise adapter/postgres would import adapter/kafka: one adapter depending on another
+- outbox.Insert takes topic / key / payload bytes, not an envelope: platform never imports contracts
+- Capture: only a definite Stripe refusal becomes CAPTURE_FAILED; everything else is retried by the consumer loop.
+  CAPTURE_FAILED leaves a CONFIRMED room for a manual fix: too costly for a network blip. Definite = by HTTP status
+  (400 / 402 / 404) and the PaymentIntent's status, not by error type: a rate limit (429) and a wrong API key (401) are
+  typed invalid_request_error too (checked against Stripe's docs, 2026-11-11)
+- No fixed Idempotency-Key on Stripe calls (flows.md had sagaId and sagaId-capture): Stripe saves the first answer per
+  key, a 5xx included, and returns it again for 24 h or more, so a retry with that key can never succeed; and the same
+  key with other parameters (ExpiresAt = now + 31 min differs per call) is a 400. A repeated call is made safe by the
+  state instead: one payment row per saga, and a PaymentIntent can be captured only once
+- saga_instances.failure_reason: ExpireBooking.reason is sent after RoomReleased, so the saga must remember the reason
+  between the two; it also tells apart the three meanings of FAILED (rejected, released, needs a human)
+- Late payment: the Stripe session expires 31 min after creation (M5) and a late authorization is voided (M7,
+  CancelPayment). Replaces G1's design: no saga step before ReleaseRoom, no "cancelled before session existed" marker
+- bookings.payment_status stays (the review first said drop): dropping touches 6 files of finished M2 code + 2 docs, and
+  UC3 adds it back. Rule: only booking-service commands change it, in the same UPDATE as status
+- CreateCheckoutSession gets its own gRPC timeout (10 s): it wraps a Stripe call. ReserveRoom / CreateBooking keep 3 s
 
 Why (decided 2026-10-12)
 - Price snapshot on the reservation: an admin will be able to change inventory prices, so a repeated call must return what was
@@ -137,18 +184,148 @@ Why phase numbers (decided 2026-11-03)
   API Gateway, Cognito, SES = Phase 3
 
 Notes for later milestones
+- Every handler from M3 on: read without a lock -> the core decides -> one conditional write (Why design review)
+- M3: saga core (internal/saga)
+    + transition(status Status, step Step, in Input) (out Outcome, ok bool): the table of state-machines.md, no I/O
+      type Outcome struct { Status Status; Step Step; FailureReason string; Commands []Command }
+      ok = false: in doesn't apply here (duplicate, late, lost a race); the caller logs and ignores it
+    + a row that ends the saga changes Status and keeps Step (BookingExpired at EXPIRING_BOOKING -> FAILED, step still
+      EXPIRING_BOOKING): COMPLETED and FAILED are never steps. With status COMPLETED or FAILED every input gives
+      ok = false (M7 adds one exception: PaymentAuthorized)
+    + inputs, one per table row: RoomReserved, RoomRejected, BookingCreated, DeadlinePassed, PaymentAuthorized,
+      ReservationConfirmed, PaymentCaptured, PaymentCaptureFailed, BookingConfirmed, RoomReleased, BookingExpired. HTTP,
+      consumer and worker all go through transition. M7 adds RoomUnknown and BookingFailed (the two phase A error rows);
+      until then the HTTP handler doesn't call transition for those two results
+    + outside transition, on purpose: owner and now < deadline_at (StartPayment, before the gRPC call); deadline_at < now
+      and status IN_PROGRESS (GetOverdue's SQL); copying an input's data (reservation, booking_id, payment_id) to the saga
+    + type Command string: only which message. Its data (ids, reason) is read from the saga when the outbox row is written
+    + test: the doc's table row by row + a double loop: every other (step, input) pair gives ok = false + each finished
+      status once: every input gives ok = false
+    + port saga.Repository
+        Create(ctx context.Context, s *Saga) (*Saga, error): returns the stored row (saga_id, version 1, created_at come
+          from the DB); s is not modified
+        GetByID(ctx context.Context, sagaID string) (*Saga, error): ErrNotFound when there is none
+        GetByBookingID(ctx context.Context, bookingID string) (*Saga, error): ErrNotFound when there is none (M5: POST
+          .../payment)
+        Save(ctx context.Context, s *Saga, commands []Command) (*Saga, error): s + commands (outbox rows) in one tx, only
+          if the stored version is still s.Version. Returns the stored row (version + 1); s is not modified, so the
+          caller continues with the returned saga (phase A saves twice). ErrStale: another writer saved first, nothing
+          was written. M3 passes no commands; the outbox insert joins in M4a
+        GetOverdue(ctx context.Context, now time.Time, limit int) ([]*Saga, error): IN_PROGRESS sagas in RESERVING_ROOM /
+          CREATING_BOOKING / AWAITING_PAYMENT with deadline_at < now (M4a)
+    + ErrStale: consumer -> return it, the loop calls the handler again from the read; deadline worker -> skip (the next
+      poll reads again); StartBooking -> 503 (the worker released the saga during the request); StartPayment -> read the
+      saga once more: still AWAITING_PAYMENT with the same payment_id -> 200, else 409 BOOKING_NOT_PAYABLE. StartPayment
+      doesn't Save when the saga already has this payment_id (a page refresh writes nothing)
 - M3: ReserveRoom error -> saga
-    + definite rejection (NOT_FOUND, INVALID_ARGUMENT, FAILED_PRECONDITION) -> saga FAILED, nothing to release, reply 404 / 400 / 409
-    + unknown outcome (timeout, UNAVAILABLE, INTERNAL) -> phase D, reply 503
-- M3: saga_instances migration is behind data-model.md: add deadline_at (= ReserveRoom expires_at) + user_id + idx_saga_deadline,
-  reservation_id TEXT -> UUID
-- M3: check the request before the saga starts: user id is a UUID, name + email not empty, guests > 0, else 400. These come
-  from the client and only CreateBooking checks them, so a bad header would hold the room, fail with INVALID_ARGUMENT, go
-  to phase D and answer 503, not contracts.md's 400
+    + definite rejection (NOT_FOUND, INVALID_ARGUMENT, FAILED_PRECONDITION) -> saga FAILED (failure_reason ROOM_REJECTED),
+      nothing to release, reply 404 / 400 / 409
+    + unknown outcome (timeout, UNAVAILABLE, INTERNAL) or any CreateBooking error -> reply 503 and save nothing: the saga
+      stays IN_PROGRESS at its step, the M4a deadline worker releases the room at deadline_at, and from M4b a PENDING
+      booking (if one was created) is expired. Until M4a exists the hold stays: rebuild the DB. Phase D at once = M7
+- M3: saga_instances migration is behind data-model.md: add deadline_at (= ReserveRoom expires_at) + user_id + idx_saga_deadline
+  + failure_reason TEXT, reservation_id TEXT -> UUID; keep version
+- M3: failure_reason is NULL while IN_PROGRESS and set in the Save that leaves the main line, never cleared: ROOM_REJECTED
+  (M3, FAILED at RESERVING_ROOM), DEADLINE (M4a, the worker's Save to RELEASING_ROOM), PHASE_A_ERROR (M7; until then a
+  phase A error is released by the worker and recorded as DEADLINE), CAPTURE_FAILED (M7). ReleaseRoom.reason and
+  ExpireBooking.reason are read from it, so both are DEADLINE or PHASE_A_ERROR
+- M3: orchestrator config has none of these yet: ROOM_GRPC_ADDR, BOOKING_GRPC_ADDR, GRPC_TIMEOUT (3s), HOLD_TTL (15m); later
+  PAYMENT_GRPC_ADDR + PAYMENT_GRPC_TIMEOUT (10s) in M5, DEADLINE_POLL (10s) in M4a. Durations: time.ParseDuration. Each
+  client call gets its own context.WithTimeout
 - M3: deadline_at made in Go: time.Now().UTC().Add(HOLD_TTL), so the 201's expires_at ends in Z like later reads
-- M4: main.go -> errgroup (hexagonal-structure.md section 5) once the Kafka consumer + outbox poller join HTTP + gRPC:
+- M4a: platform/outbox
+    + type Message struct { ID, Topic, Key string; Payload []byte }: ID = the envelope's message_id, Key = saga_id,
+      Payload = the envelope as JSON
+    + Insert(ctx context.Context, tx pgx.Tx, m Message) error: one outbox row inside the caller's tx
+    + Poller: reads the outbox table (same name and DDL in every service, no table-name parameter), cl.ProduceSync, then
+      sets published_at. acks=all and the idempotent producer are franz-go's defaults. ProduceSync retries without end
+      while the broker is down and the tx holds the row locks, so give it a ctx with a timeout; with several rows in
+      one call check each result's Err (set published_at only for the sent ones), not only FirstErr. One kgo.Client
+      per service can both produce and consume
+    + migrations: create_saga_message_log.sql goes away; create_outbox_table.sql with the data-model.md DDL in
+      orchestrator + room (M4a), booking (M4b), payment (M5): 4 copies in the end. Add DROP TABLE IF EXISTS outbox to
+      room's and booking's drop_all.sql
+- M4a: platform/kafka (franz-go)
+    + type Handler func(ctx context.Context, rec *kgo.Record) error: nil = done (processed, duplicate or ignored), an
+      error = call me again with the same record
+    + Run(ctx context.Context, cl *kgo.Client, h Handler) error: PollFetches; if fetches.IsClientClosed() or ctx.Err() !=
+      nil, return nil (a cancelled ctx arrives as a fetch error, not as a return value), so errgroup sees a clean stop.
+      Every other fetch error (fetches.EachError) is logged and Run polls again. For each record in order: call h; while
+      it returns an error, log it, wait (1 s, doubling up to 30 s; when ctx is done return without committing) and call h
+      again with the same record; after nil, CommitRecords(ctx, rec). A CommitRecords error is only logged: the record
+      was handled, it may come again after a restart, and handlers are idempotent
+    + client options: kgo.SeedBrokers, kgo.ConsumerGroup, kgo.ConsumeTopics, kgo.DisableAutoCommit. Nothing else: franz-go
+      heartbeats in the background and has no max.poll.interval, so a handler that retries for minutes keeps its
+      membership (no BlockRebalanceOnPoll: it would drop the member after 60 s)
+    + franz-go defaults to know: a new consumer group starts at the earliest offset; a consumer on a missing topic stays
+      idle without an error, and a producer to one fails after a few retries
+    + an error no retry can fix: the handler logs it at error level and returns nil. These are bad JSON, an unknown type,
+      a saga_id that isn't a UUID, and saga not found (old messages after a DB rebuild). Any other error (DB down, Stripe
+      down) is retried without end and stops every topic of that client, not one partition
+    + the 6 topics are created in infra/kafka, not by auto-create
+- Participant ports: room in M4a (shown), booking in M4b, payment in M5 (webhook) and M6 (CapturePayment)
+    + UpdateReservationStatus(ctx context.Context, sagaID string, from, to ReservationStatus, event Event) (bool, error):
+      UPDATE ... WHERE saga_id = $1 AND status = $from + the event's outbox row, in one tx. false: the reservation was not
+      in from (or there is none), nothing was written
+    + AddEvent(ctx context.Context, event Event) error: an outbox row alone. The reply to a command that arrived a second
+      time, and RoomReleased with a nil reservation_id when the saga has no reservation
+    + room.Event: a small interface with one unexported method (isEvent()), implemented by the structs
+      ReservationConfirmed{SagaID, ReservationID string} and RoomReleased{SagaID string, ReservationID *string};
+      adapter/postgres does a type switch and builds the envelope + contracts message
+    + core handler, ReleaseRoom: r := GetReservationBySagaID. No reservation -> AddEvent(RoomReleased with a nil
+      ReservationID). RELEASED -> AddEvent(RoomReleased) again. RESERVED -> UpdateReservationStatus(RESERVED -> RELEASED,
+      RoomReleased); on false return an error, so the loop calls the handler again. CONFIRMED -> error log, return nil
+    + core handler, ConfirmReservation: the same without the first case: no reservation -> error log, return nil
+    + booking and payment name the pair UpdateStatus + AddEvent (Booking / Payment is the package's main entity; room
+      keeps UpdateReservationStatus). The guard is always the status; the UPDATE may set more: booking's UpdateStatus
+      also takes the payment status (BOOKED + COMPLETED, decided in the core), and payment adds
+      MarkAuthorized(ctx context.Context, sagaID, paymentIntentID string, event Event) (bool, error): CREATED ->
+      AUTHORIZED + psp_payment_intent_id + the outbox row in one tx. CapturePayment keeps its own rule for another
+      status (state-machines.md Guards)
+    + done when, M4a: an unpaid hold -> reservation RELEASED, saga COMPENSATING / EXPIRING_BOOKING with failure_reason
+      DEADLINE, and an ExpireBooking message is in booking.commands (nobody consumes it yet). M4b: booking-service
+      consumes it -> booking EXPIRED, BookingExpired -> saga FAILED
+- M4a: main.go -> errgroup (hexagonal-structure.md section 5) once the Kafka consumer + outbox poller join HTTP + gRPC:
   one failing goroutine then stops the others and the defers run (pool.Close), instead of os.Exit in each goroutine
-- M4: envelope.OccurredAt is a plain string: time.Now().UTC().Format(time.RFC3339)
+- M4a: envelope.OccurredAt is a plain string: time.Now().UTC().Format(time.RFC3339)
+- M5: Checkout Session ExpiresAt = now + 31 min (Stripe's minimum is 30 min; 1 min spare for clock difference), created
+  without a fixed Idempotency-Key (Why design review). A session whose answer was lost was never shown to the user and
+  expires by itself. payments.saga_id UNIQUE keeps one row per saga: when the INSERT conflicts (two calls at once),
+  return the stored row's session
+- M5: grpcclient payment uses PAYMENT_GRPC_TIMEOUT; payment svc passes the request ctx to stripe-go, so the Stripe call
+  stops at the caller's deadline
+- M5: webhook: stripe-go's ConstructEvent rejects an event whose API version differs from the SDK's. Locally run
+  stripe listen --latest --forward-to ...; if it still reports a mismatch, use webhook.ConstructEventWithOptions with
+  IgnoreAPIVersionMismatch: true
+- M6: payment gateway port: Capture(ctx context.Context, paymentIntentID string) error, no idempotency key. The Kafka
+  handler has no caller deadline, so it gives the call its own timeout. In M6 any error is returned and the loop
+  retries; the rejected case is M7. Until M7 a refused capture is retried forever and blocks the consumer (locally: stop
+  the service and rebuild the DB)
+- M7: hardening list (add one line per edge case met in M3-M6)
+    + phase A unknown outcome or CreateBooking error -> tx: COMPENSATING / RELEASING_ROOM + outbox ReleaseRoom
+      (failure_reason PHASE_A_ERROR), reply 503
+    + check the request before the saga starts: user id is a UUID, name + email not empty, guests > 0, else 400. These come
+      from the client and only CreateBooking checks them, so a bad header would hold the room, fail with INVALID_ARGUMENT
+      and answer 503, not contracts.md's 400
+    + capture rejected: var ErrCaptureRejected = errors.New("capture rejected by the PSP") in payment/gateway.go. Core
+      Capture then does AUTHORIZED -> CAPTURE_FAILED + PaymentCaptureFailed, and the saga ends FAILED (failure_reason
+      CAPTURE_FAILED). Test with a fake Gateway: capture ok / rejected / transient / already captured
+    + the Stripe adapter decides by HTTP status (var stripeErr *stripe.Error; errors.As; stripeErr.HTTPStatusCode), not by
+      error type. Returned as it is, so the loop retries: an error that isn't a *stripe.Error (network, timeout), or
+      status 401, 403, 409, 429, >= 500. Definite: 400, 402, 404; there read the PaymentIntent's status first
+      (stripeErr.PaymentIntent, else Retrieve): succeeded = already captured, return nil; anything else =
+      ErrCaptureRejected. Check the exact error of a second capture once in the sandbox
+    + void a late authorization
+        contracts payment/v1: TypeCancelPayment = "CancelPayment", type CancelPayment struct{} (topic payment.commands)
+        transition: PaymentAuthorized while the step is RELEASING_ROOM or EXPIRING_BOOKING (status COMPENSATING or FAILED)
+          -> command CancelPayment, status and step unchanged. At the steps CONFIRMING_ROOM, CAPTURING_PAYMENT and
+          CONFIRMING_BOOKING (any status) a PaymentAuthorized is a duplicate: ok = false, never void a good payment
+        payment: status CANCELLED; gateway Cancel(ctx context.Context, paymentIntentID string) error. Handler: AUTHORIZED
+          -> Cancel -> CANCELLED, no event (the saga is already over); already CANCELLED -> do nothing, return nil
+        the Stripe adapter's Cancel treats "already canceled" as done: on HTTP 400 read the PaymentIntent's status,
+          canceled = return nil. Network errors, 409, 429 and 5xx are returned and the loop retries, as for capture
+    + a repeated ConfirmBooking sends BookingConfirmed again with a new message_id, so notification logs twice. Later
+      (SES): dedupe by booking_id
 - Later, Phase 3: the DB URL built with fmt.Sprintf breaks on a password with @, / or # (generated DB passwords), and the
   parse error shows part of it. Fix: url.URL{Scheme: "postgres", User: url.UserPassword(user, password), ...}
 - Later, Phase 3: GET /bookings/api/v1/{id} returns name, email and phone to anyone holding the id, while POST .../payment
@@ -166,8 +343,7 @@ Notes for later milestones
     + admin order: lock -> HasReservation -> write. Checking before the lock brings the race back: the check misses a
       hold that commits while the admin waits for the lock
     + the FK on reservations.room_id doesn't do this: its FOR KEY SHARE doesn't conflict with an UPDATE that keeps the key
-    + M4 message handlers (flows.md "Shape of every message handler": FOR UPDATE -> status check -> UPDATE + outbox)
-      may need the same pattern, so RunInTx can come back in M4: decide there
+    + M4a / M4b message handlers don't use RunInTx (decided 2026-11-11: conditional update, Why design review)
     + test by hand with two sessions (a mocked unit test has no tx or lock, so it can't show this). psql session A plays
       the admin: BEGIN; SELECT id FROM rooms WHERE id = '<room>' FOR UPDATE; -> grpcurl ReserveRoom hangs (its FOR SHARE
       waits) -> A: UPDATE rooms SET status = 'INACTIVE' ...; COMMIT; -> ReserveRoom returns ROOM_UNAVAILABLE (READ
@@ -175,7 +351,31 @@ Notes for later milestones
       grpcurl, it waits for A's COMMIT. Before the fix the same script shows the race (Reserve doesn't wait). A Go
       integration test (real DB, two txs + timeout) is later: phase 1 has no test DB
 
+- After UC1, before the FE: availability + capacity (the price is first seen in the 201 today, after the room is held)
+    + GET /rooms/api/v1/availability?check_in_date=&check_out_date=&number_of_guests= -> rooms with total_amount, currency,
+      nightly_rates. A quote, not a promise: ReserveRoom still locks the price
+    + core: quote(checkIn, checkOut time.Time, inventories []*Inventory) ([]NightlyRate, int64, string, error): the pricing
+      loop moved out of Reservation.setRates, which then calls it (reservation.go + its test)
+    + port: GetAvailable(ctx context.Context, checkIn, checkOut time.Time) ([]*Room, error): ACTIVE rooms with NOT EXISTS an
+      overlapping RESERVED / CONFIRMED hold, same daterange expression as the constraint so its GiST index serves it
+    + rooms.capacity INT NOT NULL + number_of_guests in ReserveRoomRequest: room svc rejects more guests than capacity
+    + later: the client sends the total it saw, 409 PRICE_CHANGED when ReserveRoom's total differs (compared, never used)
+- Later (E6): tombstone for a hold that commits after its release
+    + in reservations itself, not a separate table: under READ COMMITTED neither tx sees the other's uncommitted row, so
+      both would commit. They must collide on one unique key (saga_id)
+    + ReleaseRoom data gets room_id, check_in_date, check_out_date (from the saga context). Release, one tx with the
+      outbox row: UPDATE RESERVED -> RELEASED; 0 rows -> INSERT a RELEASED row ON CONFLICT (saga_id) DO NOTHING (total 0,
+      nightly_rates '[]', currency XXX, expires_at now()); 0 rows again -> a row with this saga_id just committed: run
+      the UPDATE again (1 row = the hold, now released; 0 rows = already RELEASED by a repeated ReleaseRoom). Reply
+      RoomReleased in every case
+    + the INSERT fails on the room_id FK or check_dates when the saga has an unknown room or bad dates: treat 23503 /
+      23514 as nothing to release (a hold with these values can't be inserted either), or the loop retries forever
+    + existing code: CreateReservation returns the stored row on a conflict without looking at its status, so Reserve must
+      check Released after CreateReservation too (room/service.go), not only before
+    + E1 (booking) stays open: an orphan PENDING booking holds no room and no money
+
 Cleanup (any time)
+- plan.md: trim Done to one line per milestone (git has the detail)
 - contracts/envelope: round-trip test (skipped in step 1, do it once the real gRPC call works)
 - user-service handlers + repository, same as room's step 9 fixes: code done (2026-11-03), left: run by hand in Postman:
   malformed id, unknown JSON field, bad role, malformed email -> 400; unknown id on GET / PUT -> 404; taken email on
@@ -183,11 +383,31 @@ Cleanup (any time)
   updated_at moves on PUT; empty table -> []. The saved "user update" id (356e528f...) isn't in the seed: use an id that
   exists, or it's a correct 404
 
+Code changes from the doc sync (2026-11-11: the docs now describe these, the code doesn't yet; for me to write)
+- Comments only, any time
+    + orchestrator-service/internal/saga/repository.go: says "Create, GetForUpdate, Save" and "saga_message_log, the
+      outbox" -> Create, GetByID, GetByBookingID, Save, GetOverdue (Notes, M3); Save writes the outbox table
+    + booking-service and payment-service internal/adapter/kafka/mapper.go: "to and from ... domain types" -> incoming
+      messages only; outgoing events are mapped in adapter/postgres
+    + contracts/booking/v1/messages.go: ExpireBooking.Reason gets the comment //DEADLINE, PHASE_A_ERROR (the same values
+      as ReleaseRoom.Reason in room/v1/messages.go)
+- With their milestone (signatures and rules: Notes for later milestones)
+    + M3: orchestrator-service/db/migration/create_saga_instances.sql (deadline_at, user_id, failure_reason,
+      reservation_id UUID, idx_saga_deadline; keep version); config/config.go + .env.example (the new variables)
+    + M4a: delete orchestrator-service/db/migration/create_saga_message_log.sql; create_outbox_table.sql in orchestrator +
+      room; room's drop_all.sql; platform/outbox + platform/kafka (franz-go goes into platform/go.mod)
+    + M4b: create_outbox_table.sql in booking; booking's drop_all.sql
+    + M5: payment-service/db/migration/create_payments_table.sql (the real DDL from data-model.md; today it is only a
+      comment) + create_outbox_table.sql
+    + M7: contracts/payment/v1/messages.go (TypeCancelPayment, CancelPayment struct{}) and doc.go (payment.commands:
+      + CancelPayment); payment-service internal/adapter/kafka/consumer.go comment (+ CancelPayment); payment_state
+      + CANCELLED in create_payments_table.sql
+
 Docs to sync
-- flows.md, state-machines.md, README timers: room status + date validation in ReserveRoom; ReserveRoom is idempotent by saga_id
-  (a repeated call returns the stored row)
-- use-cases.md line 35: "Update inventory" is stale (occupancy lives only in reservations)
-- state-machines.md line 89: "Proposed enum changes (confirm)" is stale (README Q1 confirmed them)
+- Nothing open. Synced 2026-11-11: uc1 README, flows, state-machines, data-model, contracts, good-to-have,
+  hexagonal-structure, services, use-cases, CLAUDE.md. architecture_uc_create_order.excalidraw was checked: it draws
+  only the main line (no deadline, release or void arrows), so nothing in it became wrong
+- The docs listed in M2 step 8 are not part of this sync: they stay with that step
 
 After UC1
 - UC2 cancel booking, UC3 payment refund: TODO, not designed

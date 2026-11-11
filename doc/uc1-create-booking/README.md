@@ -76,7 +76,7 @@ flowchart LR
 
 - There is only **one compensation path (D)**, used for both timeout and failure. It works by `sagaId`, so it's safe even when we don't know how far phase A got.
 - A declined card does **not** end the saga. The user can retry on Stripe's page until the deadline.
-- Why no "cancel payment" step in D: we never capture unless the room was confirmed, so an authorization that arrives after the deadline is just ignored and the bank releases it. Voiding it immediately is G1.
+- No "cancel payment" step in D: we never capture unless the room was confirmed. The Stripe session expires 31 min after it is created, and an authorization that still arrives after the release is voided with `CancelPayment` ([flows.md](flows.md#phase-c-confirm--capture--book--notify)). No saga step waits for that.
 
 ## 3. Who owns what (v1)
 
@@ -100,6 +100,8 @@ The orchestrator stays a separate service, not merged into Booking. Seeing the s
    - otherwise → ignore and log
 
    This makes duplicate and late messages harmless without inbox tables (G5). Rules per entity are in [state-machines.md](state-machines.md#guards).
+
+   The write is a **conditional update**, not a row lock: a participant updates `WHERE status = <the status it read>`, the saga `WHERE version = <the version it read>`. If 0 rows change, another writer was first, and the handler runs again from the read ([flows.md](flows.md#shape-of-every-message-handler)).
 4. **No DB transaction across a network call** (gRPC, Stripe). Save → call → save the result.
 5. **Money never comes from the client.** Prices come from room inventory.
 6. **Kafka key = `sagaId`.**
@@ -111,18 +113,24 @@ The orchestrator stays a separate service, not merged into Booking. Seeing the s
 |---|---|---|
 | `HOLD_TTL` | 15 min | at saga start, `deadline_at = now + HOLD_TTL`, also sent to Room as the reservation's `expires_at` |
 | `DEADLINE_POLL` | 10 s | deadline worker interval |
-| `GRPC_TIMEOUT` | 3 s | no retry in v1: a timeout or other unknown outcome in phase A goes to phase D (a definite `ReserveRoom` rejection only fails the saga, see [flows.md](flows.md#phase-a-hold-room-and-create-booking-sync)); an error in phase B goes back to the client (`503`) and the saga stays as it is (retries = G3) |
+| `GRPC_TIMEOUT` | 3 s | `ReserveRoom` and `CreateBooking`. No retry in v1: a timeout or other unknown outcome in phase A goes to phase D (a definite `ReserveRoom` rejection only fails the saga, see [flows.md](flows.md#phase-a-hold-room-and-create-booking-sync)) (retries = G3) |
+| `PAYMENT_GRPC_TIMEOUT` | 10 s | `CreateCheckoutSession`, longer because it wraps a Stripe call. An error in phase B goes back to the client (`503`) and the saga stays as it is |
+| Stripe session lifetime | 31 min | `expires_at` of the Checkout Session, counted from its creation (Stripe's minimum is 30 min) |
 
 ## 6. Build order (each milestone is testable on its own)
+
+M3–M6 build only the **main line** of each flow. Edge cases wait for M7; the steps and signatures are in `doc/plan.md`.
 
 | # | Milestone | Done when |
 |---|---|---|
 | **M1** | `contracts/` module (`envelope/`, `room/v1/room.proto` + buf generation); Room `ReserveRoom` gRPC + exclusion constraint | `grpcurl` reserves; a second overlapping call fails with `ROOM_UNAVAILABLE` |
 | **M2** | Booking `CreateBooking` gRPC (idempotent by `saga_id`) | `grpcurl` creates a `PENDING` booking; the same `saga_id` returns the same ID |
-| **M3** | Orchestrator phase A: `POST /bookings` → ReserveRoom → CreateBooking (**no Kafka yet**) | Postman gets `201` with `bookingId`, `expiresAt`. On a gRPC error the saga moves to `RELEASING_ROOM` with an outbox row; it gets published once M4 exists |
-| **M4** | Kafka (single-node docker, `infra/kafka`) + outbox poller + **phase D**: deadline worker → `ReleaseRoom` → `ExpireBooking` | a hold left unpaid is released and the booking is `EXPIRED` after `HOLD_TTL` (set it to 1 min for testing) |
+| **M3** | Orchestrator phase A: `POST /bookings` → ReserveRoom → CreateBooking (**no outbox, no Kafka**) | Postman gets `201` with `bookingId`, `expiresAt`. A definite `ReserveRoom` rejection gives `404` / `400` / `409` and saga `FAILED`; any other error gives `503` and the saga is left for the M4a deadline worker |
+| **M4a** | Kafka (single-node docker, `infra/kafka`) + outbox (Insert + Poller) + consumer loop; first half of **phase D**: deadline worker → `ReleaseRoom` → `RoomReleased` | after `HOLD_TTL` (set it to 1 min for testing) the reservation is `RELEASED`, the saga is in `EXPIRING_BOOKING`, and `ExpireBooking` is in `booking.commands` |
+| **M4b** | Second half of phase D: `ExpireBooking` → `BookingExpired` | the booking is `EXPIRED` and the saga `FAILED` |
 | **M5** | Payment: `CreateCheckoutSession` + webhook → `PaymentAuthorized` (use `stripe listen` locally) | open `checkoutUrl` in a browser and pay with test card `4242…`; `payments.status = AUTHORIZED` and the event is in Kafka |
 | **M6** | Phase C chain + notification consumer | booking `BOOKED`, payment `CAPTURED` in the Stripe dashboard, notification log line |
+| **M7** | Hardening: phase A error → phase D at once, request checks (`400`), capture rejected → `CAPTURE_FAILED`, void a late authorization (`CancelPayment`) | each case run by hand once; then [good-to-have.md](good-to-have.md) |
 
 M4 comes before M5 on purpose: the first Kafka flow (phase D) needs no Stripe, so you learn outbox and consumers on the simplest case.
 
@@ -131,6 +139,10 @@ M4 comes before M5 on purpose: the first Kafka flow (phase D) needs no Stripe, s
 | # | Question | Decision |
 |---|---|---|
 | Q1 | Booking statuses | `PENDING → BOOKED \| EXPIRED`; drop `RESERVED`, `RESERVATION_FAILED`, `PAYMENT_FAILED` ([state-machines.md](state-machines.md#booking)) |
-| Q2 | Where `.proto` + shared message structs live | 2 modules in this repo: `contracts/` (proto + messages, one package per owning service) and `platform/` (outbox), wired with `replace` ([hexagonal-structure.md](../hexagonal-structure.md)) |
+| Q2 | Where `.proto` + shared message structs live | 2 modules in this repo: `contracts/` (proto + messages, one package per owning service) and `platform/` (outbox, Kafka consumer loop), wired with `replace` ([hexagonal-structure.md](../hexagonal-structure.md)) |
 | Q3 | `HOLD_TTL` | 15 min |
 | Q4 | How the user pays (2026-10-11) | Stripe **hosted page** (Checkout Session + redirect), not an embedded Stripe.js form with a `client_secret`: no frontend is needed, and our services only pass a URL ([flows.md](flows.md#phase-b-pay)) |
+| Q5 | How handlers stay correct in a race (2026-11-11) | Conditional update, no row lock: participants guard by `status`, the saga by `version` (rule 3) |
+| Q6 | Kafka client (2026-11-11) | `franz-go` (pure Go). A failed handler is called again with the same record; the offset is committed only after it succeeds |
+| Q7 | Stripe idempotency (2026-11-11) | No fixed `Idempotency-Key`. A repeated call is made safe by the state: one payment row per saga, and a PaymentIntent can be captured only once ([flows.md](flows.md#phase-b-pay)) |
+| Q8 | Late payment (2026-11-11) | The session expires 31 min after creation, and an authorization that arrives after the release is voided (`CancelPayment`, M7) |

@@ -47,14 +47,14 @@ Every service uses the same pattern: **`/<service-prefix>/health`** and **`/<ser
 |---|---|---|---|
 | `room.commands` | orchestrator | room-service | `ConfirmReservation`, `ReleaseRoom` |
 | `room.events` | room | orchestrator-service | `ReservationConfirmed`, `RoomReleased` |
-| `payment.commands` | orchestrator | payment-service | `CapturePayment` |
+| `payment.commands` | orchestrator | payment-service | `CapturePayment`, `CancelPayment` |
 | `payment.events` | payment | orchestrator-service | `PaymentAuthorized`, `PaymentCaptured`, `PaymentCaptureFailed` |
 | `booking.commands` | orchestrator | booking-service | `ConfirmBooking`, `ExpireBooking` |
 | `booking.events` | booking | orchestrator-service, notification-service | `BookingConfirmed`, `BookingExpired` |
 
 Key = `saga_id`. Consumers ack and skip any `type` they don't handle.
 
-## 4. Messages (12)
+## 4. Messages (13)
 
 Participants find their row **by `saga_id`** from the envelope, so most commands need no `data`.
 
@@ -66,11 +66,12 @@ Participants find their row **by `saga_id`** from the envelope, so most commands
 | `CapturePayment` | command | — |
 | `PaymentCaptured` | event | `payment_id, amount, currency` |
 | `PaymentCaptureFailed` | event | `payment_id, reason` |
+| `CancelPayment` | command | — (M7: voids an authorization that arrived after the release; no reply event) |
 | `ConfirmBooking` | command | — |
 | `BookingConfirmed` | event | `booking_id, user_id, user_name, user_email, user_phone_number, room_number, room_type, check_in_date, check_out_date, number_of_guests, total_amount, currency` (fat event: notification needs no lookups) |
 | `ReleaseRoom` | command | `reason` (`DEADLINE`, `PHASE_A_ERROR`) |
 | `RoomReleased` | event | `reservation_id` (null if there was nothing to release) |
-| `ExpireBooking` | command | `reason` |
+| `ExpireBooking` | command | `reason` (`DEADLINE`, `PHASE_A_ERROR`, the same value as its `ReleaseRoom`) |
 | `BookingExpired` | event | `booking_id` (null if there was no booking) |
 
 Naming: commands are imperative and go to one owner; events are past tense and anyone may listen.
@@ -95,7 +96,7 @@ Example: [`../Message-definition.json`](../Message-definition.json).
 **Decided (Q2):** there are two shared Go modules **inside this repo**, rather than separate git repos or one module per service:
 
 - **`contracts/`** (`booking/contracts`) holds **definitions only**, with no infra dependencies. It has one package per owning service, each containing the `.proto`, its generated code, and the Kafka `data` structs, plus a shared `envelope/`. Commands belong to the receiver's package and events to the emitter's. A service imports only the packages it needs.
-- **`platform/`** (`booking/platform`) holds shared **infra** code, starting with `outbox/` (Insert + Poller). Only adapters and `cmd/main.go` import it.
+- **`platform/`** (`booking/platform`) holds shared **infra** code: `outbox/` (Insert + Poller) and `kafka/` (the consumer loop, franz-go). Only adapters and `cmd/main.go` import it.
 
 Both are wired with `replace` directives. Full layout and import rules are in [hexagonal-structure.md](../hexagonal-structure.md).
 
