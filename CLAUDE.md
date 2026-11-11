@@ -26,6 +26,16 @@ This is a **learning project**. I'm studying Go, microservices/Saga, CI/CD, and 
 - When a change makes a doc wrong, fix the doc in the same pass, or add it to "Docs to sync" if I limited the scope.
 - Docs in `doc/` are my working notes and may be rough, partly in Vietnamese, or behind the code. Check them against the code, and tell me when they disagree.
 
+**Workflows and subagents**
+- You decide whether to start a workflow, without asking, but only when one of these holds:
+  - a whole-design or cross-service review
+  - facts about an external library or API that I will build on and you cannot confirm from the repo
+  - a change touching 3+ services
+- Never for re-reviewing a fix, a single-service diff, or doc sync: do those inline.
+- At most 4 agents per workflow. Lookup, doc-check and test-running agents use `model: 'sonnet'` at `effort: 'medium'`; only concurrency/saga reasoning and adversarial review inherit the session model.
+- When you start one, say so in one line with the reason.
+- If a workflow would clearly be better in a case not listed here, don't start it: suggest it in one line with a rough cost, and suggest the wording to add to this list. I decide.
+
 ## Project overview
 
 A simple hotel booking system, built as Go microservices with **hexagonal architecture** inside each service and a **Saga orchestrator** coordinating the booking flow.
