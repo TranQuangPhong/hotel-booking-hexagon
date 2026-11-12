@@ -102,6 +102,7 @@ func main() {
 	}
 	opts := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
+			// first: it must wrap recovery, so a recovered panic is still logged as Internal
 			grpclogger.UnaryServerInterceptor(),
 			// Without a handler, v2 sends a panic to the client as UNKNOWN + stack trace and logs nothing
 			recovery.UnaryServerInterceptor(recovery.WithRecoveryHandlerContext(
@@ -135,6 +136,7 @@ func main() {
 	} else {
 		slog.Info("HTTP server exiting gracefully")
 	}
+
 	// GracefulStop has no time limit: Stop force-closes the running RPCs once shutdownCtx expires
 	cancelForceStop := context.AfterFunc(shutdownCtx, grpcServer.Stop)
 	grpcServer.GracefulStop()
