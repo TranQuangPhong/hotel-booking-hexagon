@@ -42,7 +42,7 @@ This is a **learning project**. I'm studying Go, microservices/Saga, CI/CD, and 
   - a milestone-end consistency audit: docs, contracts and code across services
   - a bug with several plausible causes across services (one agent per cause)
 - Never for re-reviewing a fix, a single-service diff, doc sync, or reading one technical document: do those inline.
-- Plugin skills (`engineering`, `productivity`) never start on their own. When one of these fits, suggest it in one line and wait for my yes: `engineering:debug` (a bug whose cause isn't obvious), `engineering:testing-strategy` (planning tests for a milestone), `engineering:architecture` (an open decision that is costly to reverse), `engineering:system-design` (designing UC2 / UC3). Later: `engineering:tech-debt` (M7), `engineering:deploy-checklist` (phase 3). Don't use the rest unless I name one. A skill's output still follows this file: short docs, numbered findings, decisions in `doc/plan.md`.
+- No market plugins: I disabled them all. We write our own project skill (`.claude/skills/<name>/SKILL.md`) only for a procedure of 5+ steps that we have already run by hand twice; suggest it in one line when that happens. First candidate: closing a milestone.
 - At most 4 agents per workflow. Lookup, doc-check and test-running agents use `model: 'sonnet'` at `effort: 'medium'`; only concurrency/saga reasoning and adversarial review inherit the session model.
 - When you start one, say so in one line with the reason.
 - If a workflow would clearly be better in a case not listed here, don't start it: suggest it in one line with a rough cost, and suggest the wording to add to this list. I decide.
