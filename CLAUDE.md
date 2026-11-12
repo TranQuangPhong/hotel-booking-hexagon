@@ -9,6 +9,12 @@ This is a **learning project**. I'm studying Go, microservices/Saga, CI/CD, and 
 - **I hand you the rest, one item at a time:** detailed design docs, workspace-wide refactors and renames, stubs, subtle edge-case fixes, doc sync. When I say "fix it", "you fix" or "you impl", finish the whole item.
 - **Stay inside the scope I name.** "Discuss" and "review" mean change nothing. "Only note to plan.md" means edit only that file. "Fix the doc & code" does not include new functions. A plan or doc request never includes running commands.
 
+**Execute or discuss**
+- A question ("?", "should I", "how", "why", "discuss", "review") means discuss: answer, recommend, change nothing.
+- An order ("fix", "impl", "add", "update", "you do") means execute: finish the whole item, don't ask about routine choices, pick and tell me after. My decision on a point you raised counts as an order to apply the fix you proposed.
+- A numbered message is judged per item. If unclear, answer first and offer the action in one line.
+- Be proactive in both: in a discussion, raise better ideas and risks I didn't ask about; in an execution, fix closely related issues, prefer best practice, verify (build, vet, test), then list the extras.
+
 **How to answer**
 - **You are my consultant, so challenge me.** When you see an idea or solution better than mine, or better than what the code and docs do now, say so even if I didn't ask: what is better, why, and what it costs to switch. Don't just go along with my approach. Suggest only, I decide; a better idea that belongs to a later phase gets one line marked "later".
 - When I ask "how do I do X", give me the approach, the trade-offs, and a small snippet if needed. Don't hand me a finished file.
@@ -27,11 +33,16 @@ This is a **learning project**. I'm studying Go, microservices/Saga, CI/CD, and 
 - Docs in `doc/` are my working notes and may be rough, partly in Vietnamese, or behind the code. Check them against the code, and tell me when they disagree.
 
 **Workflows and subagents**
-- You decide whether to start a workflow, without asking, but only when one of these holds:
+- I opt in to multi-agent workflows in these cases. Start one without asking, but only when one of them holds:
   - a whole-design or cross-service review
   - facts about an external library or API that I will build on and you cannot confirm from the repo
   - a change touching 3+ services
-- Never for re-reviewing a fix, a single-service diff, or doc sync: do those inline.
+  - an adversarial check of a saga or concurrency design before I build on it (races, repeated messages, a crash between two steps)
+  - real-world practice research for an open decision that is costly to reverse
+  - a milestone-end consistency audit: docs, contracts and code across services
+  - a bug with several plausible causes across services (one agent per cause)
+- Never for re-reviewing a fix, a single-service diff, doc sync, or reading one technical document: do those inline.
+- Plugin skills (`engineering`, `productivity`) never start on their own. When one of these fits, suggest it in one line and wait for my yes: `engineering:debug` (a bug whose cause isn't obvious), `engineering:testing-strategy` (planning tests for a milestone), `engineering:architecture` (an open decision that is costly to reverse), `engineering:system-design` (designing UC2 / UC3). Later: `engineering:tech-debt` (M7), `engineering:deploy-checklist` (phase 3). Don't use the rest unless I name one. A skill's output still follows this file: short docs, numbered findings, decisions in `doc/plan.md`.
 - At most 4 agents per workflow. Lookup, doc-check and test-running agents use `model: 'sonnet'` at `effort: 'medium'`; only concurrency/saga reasoning and adversarial review inherit the session model.
 - When you start one, say so in one line with the reason.
 - If a workflow would clearly be better in a case not listed here, don't start it: suggest it in one line with a rough cost, and suggest the wording to add to this list. I decide.
@@ -44,7 +55,7 @@ A simple hotel booking system, built as Go microservices with **hexagonal archit
 |---|---|---|---|
 | `user-service` | Done (CRUD APIs tested) | PostgreSQL | Profile only; Cognito handles auth (phase 3) |
 | `room-service` | Room CRUD + inventory edit (`PATCH`) done (creating a room opens 12 months of inventory); `ReserveRoom` gRPC done (M1) | PostgreSQL (+ Redis lock later) | Rooms, monthly inventory (JSONB days), reservations |
-| `booking-service` | WIP (M2 next): model/repo/service, handler partial, `main.go` stub | PostgreSQL | Booking stores user and room **snapshots** plus nightly rates |
+| `booking-service` | WIP (M2): core, Postgres adapter, `CreateBooking` gRPC and `GET /:id` built, not run yet; current step in `doc/plan.md` | PostgreSQL | Booking stores user and room **snapshots** plus nightly rates |
 | `orchestrator-service` | Skeleton only | PostgreSQL | `saga_instances` schema designed; it gets the same `outbox` table as the other services |
 | `payment-service` | Skeleton only (config done) | PostgreSQL + Stripe sandbox | |
 | `notification-service` | Skeleton only | None in v1 (logs the notification); MongoDB + AWS SES in phase 3 | v1 is a Kafka consumer only: no HTTP server, no DB |
@@ -116,20 +127,21 @@ Run from inside a service directory, since each one is a separate module:
 go run ./cmd            # start service (needs .env or env vars)
 go build ./...
 go vet ./...
-go test ./...           # unit tests so far: room-service internal/room
+go test ./...           # unit tests so far: room-service internal/room, booking-service internal/booking
 go mod tidy
 ```
 Infra: `infra/postgresql/docker-compose.yml` currently defines only `postgres-booking` (host port 5440). `infra/kafka` and `infra/mongodb` are empty placeholders. Migrations in `db/migration/` are applied by hand.
 
 My setup:
 - Windows + PowerShell: commands you give me must run there.
-- I run the services and test with Postman / grpcurl myself. Don't run anything against my database.
+- I run the services and test with Postman / grpcurl myself.
+- The local DB is a test DB and you are its admin through the `pg-*` MCP servers: query and change it freely (start DDL with `SET ROLE booking`). Docker is usually off, so when a task needs the real DB, tell me and I'll start it.
 - Local DBs are throwaway in phase 1: change the `CREATE` file and rebuild (room-service has `drop_all.sql`). No `ALTER` migrations.
 - `.gitattributes` forces LF, so `gofmt -l .` from the repo root should print nothing. Anything it lists is a real formatting problem.
 
 ## Roadmap
 
-1. **Phase 1, local:** finish service APIs, then implement **UC1 create booking end to end** (orchestrator → room → booking → payment → notify). ← *current focus*: the UC1 build order M1–M7 (`doc/uc1-create-booking/README.md` section 6; M3–M6 build the main line only, M7 hardens). M1 is done; M2 is next (steps in `doc/plan.md`).
+1. **Phase 1, local:** finish service APIs, then implement **UC1 create booking end to end** (orchestrator → room → booking → payment → notify). ← *current focus*: the UC1 build order M1–M7 (`doc/uc1-create-booking/README.md` section 6; M3–M6 build the main line only, M7 hardens). M1 is done; M2 is in progress (current step in `doc/plan.md`).
 2. **Phase 2, local deployment:** deploy and test the full flow locally (no AWS Gateway, Cognito, or Lambda yet).
 3. **Phase 3, AWS:** API Gateway, Cognito (plus a Lambda to sync users), SES, deployment.
 4. **Phase 4:** CI/CD, monitoring, and logging.
