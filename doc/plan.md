@@ -44,6 +44,8 @@ Done
   its argument. gRPC CreateBooking: toBooking maps every field, any non-input error -> logged INTERNAL (no NOT_FOUND).
   REST: GET /:id only, own BookingResponse + NightlyRateResponse DTO, parseBookingID -> 400, writeError 404 / logged 500.
   booking.Booking has db tags only. Builds + go test passes; not run yet (needs step 7)
+- M2 step 7 (2026-11-13): main.go same as room's (HTTP + gRPC, grpclogger before recovery, graceful stop of both),
+  go-grpc-middleware/v2 direct after tidy; both main.go have the same commented interceptor chain. Not run yet (step 8)
 
 UC1 build order (main line of each flow first, decided 2026-11-11; done-when per milestone: uc1 README.md section 6)
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
@@ -59,7 +61,7 @@ UC1 build order (main line of each flow first, decided 2026-11-11; done-when per
   then good-to-have.md
 - Rule for M3-M6: an edge case met on the way gets one line under M7 (Notes), not code
 
-Next step: M2 step 7 (user writes main.go)
+Next step: M2 step 8 (run booking-service, grpcurl + Postman checks, doc sync)
 Open decision (review round 2, 2026-11-12; decide before M5): starting payment extends the hold to the Stripe session's
   end (StartPayment's Save sets deadline_at = the session's expires_at + 1 min; CreateCheckoutSessionResponse gets
   expires_at). Today a user who opens the page at minute 10 and pays at minute 16 sees Stripe's success page and then an
@@ -71,10 +73,8 @@ M2: Booking CreateBooking gRPC
 booking-service predates the UC1 schema: create_tables.sql has the right columns, but the Go code still reads a nightly_rates
 table, has old statuses, and the adapter doesn't implement its port. Same shape as room's M1
 
-7. cmd/main.go, same as room's: time.Local = time.UTC first, pgxpool.New + Ping, repo -> service -> handler,
-   gRPC server (grpclogger first, recovery, reflection), graceful stop of both. No unknown-fields flag: no JSON body here.
-   Then go mod tidy: the recovery interceptor (go-grpc-middleware/v2) is a new import
 8. Done when (grpcurl + Postman)
+    + Each gRPC call logs "gRPC request completed" with trace_id and saga_id (grpclogger is wired)
     + CreateBooking -> booking_id + PENDING; the same saga_id again -> same booking_id and no new row, even when the
       second request has other valid data
     + DB: nightly_rates has "date":"YYYY-MM-DD"; status and payment_status are PENDING
