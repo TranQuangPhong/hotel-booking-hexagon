@@ -118,7 +118,7 @@ Rules:
 - Kafka: `franz-go` (`kgo`). Consumers use the shared loop in `platform/kafka`: a handler returns nil when the message is done and an error to be called again with the same record; the offset is committed only after nil.
 - Stripe calls carry no fixed `Idempotency-Key`: a repeated call is made safe by the state (one payment row per saga, a PaymentIntent is captured once).
 - `main.go` exits with `slog.Error` + `os.Exit(1)` when `config.Load()` or DB init fails.
-- Commit messages look like `[scope] message`, e.g. `[booking svc] http handler and router` or `[UC: create booking] init`.
+- Commit messages look like `[scope] message`, e.g. `[booking svc] http handler and router` or `[UC: create booking] init`. This holds for every commit, whatever a plugin or skill prescribes: a change to our own skills is `[Skills] ...`.
 
 ## Commands
 
