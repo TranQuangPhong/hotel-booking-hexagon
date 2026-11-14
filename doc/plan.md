@@ -56,7 +56,7 @@ UC1 build order (main line of each flow first, decided 2026-11-11; done-when per
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
 - M2: Booking CreateBooking gRPC, idempotent by saga_id (done 2026-11-15)
 - M3: Orchestrator phase A: saga migration + core + Save; POST /bookings -> ReserveRoom -> CreateBooking -> 201.
-  No outbox, no Kafka   <- NOW (steps not detailed yet)
+  No outbox, no Kafka   <- NOW, steps below
 - M4a: infra/kafka, platform outbox (Insert + Poller) + consumer loop, errgroup main.go; deadline worker -> ReleaseRoom
   -> RoomReleased
 - M4b: ExpireBooking -> BookingExpired -> saga FAILED
@@ -66,13 +66,263 @@ UC1 build order (main line of each flow first, decided 2026-11-11; done-when per
   then good-to-have.md
 - Rule for M3-M6: an edge case met on the way gets one line under M7 (Notes), not code
 
-Next step: M3, detail its steps first (Notes: "M3: go.mod wiring first, like M2 step 1")
+Next step: M3 step 1 (wiring)
 Open decision (review round 2, 2026-11-12; decide before M5): starting payment extends the hold to the Stripe session's
   end (StartPayment's Save sets deadline_at = the session's expires_at + 1 min; CreateCheckoutSessionResponse gets
   expires_at). Today a user who opens the page at minute 10 and pays at minute 16 sees Stripe's success page and then an
   EXPIRED booking (the void only protects the money). Cost: a user who opens the page and leaves holds the room up to
   ~46 min, and bookings.expires_at goes stale (the client uses the expires_at of the payment response). Other fix: G1
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
+
+M3: Orchestrator phase A (POST /bookings -> ReserveRoom -> CreateBooking -> 201)
+orchestrator-service is a skeleton: empty main.go, comment-only files, go.mod with gin + logger v1.0.0. No outbox, Kafka
+or worker yet. Same shape as M1 / M2, plus two gRPC clients. The rules behind the choices: Why M3
+
+1. Wiring
+    + go.mod: logger v1.1.0 + replace booking/contracts, like M2 step 1. The require comes with step 8 (tidy removes a
+      require nothing imports): go mod edit "-require=booking/contracts@v0.0.0", then go mod tidy. booking/platform
+      joins in M4a with the outbox. pgx/v5, grpc and google/uuid arrive by go mod tidy with their first import
+    + config/config.go (durations: time.ParseDuration; an empty address or a duration <= 0 is an error, so Load fails
+      at start, not at the first request)
+      type Clients struct {      // gRPC clients of the participants
+          RoomAddr    string        // ROOM_GRPC_ADDR, e.g. localhost:9180
+          BookingAddr string        // BOOKING_GRPC_ADDR
+          Timeout     time.Duration // GRPC_TIMEOUT, 3s: each call gets its own context.WithTimeout
+      }
+      type Saga struct { HoldTTL time.Duration } // HOLD_TTL, 15m
+      Config gets Clients + Saga next to Server, DB, Kafka (Kafka stays, unused until M4a). .env.example + your .env:
+      the addresses are room's and booking's GRPC_PORT. M4a adds DEADLINE_POLL, M5 PAYMENT_GRPC_ADDR + _TIMEOUT
+    + DB: create the orchestrator database + role where room and user live (DB_* in your .env). Later: a pg-orchestrator
+      MCP entry like pg-room, so I can check saga rows myself
+2. Migration (the CREATE file changes, so the DB is rebuilt; no ALTER)
+    + create_saga_instances.sql
+        new CREATE TYPE saga_step AS ENUM (the 8 steps of state-machines.md); current_step saga_step NOT NULL
+        add user_id UUID NOT NULL, deadline_at TIMESTAMPTZ NOT NULL, failure_reason TEXT (NULL = on the main line)
+        reservation_id TEXT -> UUID; keep version, context, booking_id, payment_id, type, the set_updated_at trigger
+        indexes: idx_saga_deadline ON (deadline_at) WHERE status = 'IN_PROGRESS' (data-model.md) replaces
+          idx_saga_instances_status_updated; drop idx_saga_instances_type_status (no query); idx_saga_instances_booking_id
+          becomes UNIQUE (one saga per booking; M5 GetByBookingID reads it)
+        drop CREATE EXTENSION pgcrypto: gen_random_uuid() is built in since Postgres 13
+    + db/migration/drop_all.sql (new), IF EXISTS everywhere: saga_message_log (FK to saga_instances), saga_instances,
+      function set_updated_at, types saga_status, saga_step, saga_type, direction, message_type. Then apply
+      create_saga_instances.sql only: saga_message_log is not v1 and its file goes in M4a
+3. Core model (internal/saga)
+    + saga.go: one field per line with a db tag = column name, like booking (RowToAddrOfStructByName)
+      type Saga struct {
+          ID            string        // saga_id
+          Type          Type          // CREATE_BOOKING
+          Status        Status
+          Step          Step          // current_step
+          UserID        string
+          ReservationID string        // "" until ReserveRoom succeeds
+          BookingID     string        // "" until CreateBooking succeeds
+          PaymentID     string        // "" until M5
+          Context       Context
+          FailureReason FailureReason // "" while on the main line
+          DeadlineAt    time.Time     // = ReserveRoom's and CreateBooking's expires_at, the 201's expires_at
+          Version       int
+          CreatedAt, UpdatedAt time.Time
+      }
+      // Context is the context JSONB: everything the next call needs. snake_case json tags on every field = the
+      // stored format
+      type Context struct {
+          User                      User          `json:"user"`
+          RoomID                    string        `json:"room_id"`
+          CheckInDate, CheckOutDate string        // YYYY-MM-DD, as sent: room svc checks them (Why M3)
+          NumberOfGuests            int
+          RoomNumber, RoomType      string        // from here on: set from ReserveRoom's response, omitempty
+          TotalAmount               int64
+          Currency                  string
+          NightlyRates              []NightlyRate
+      }
+      type User struct { ID, Name, Email, PhoneNumber string } // json: id, name, email, phone_number (may be empty)
+      type NightlyRate struct { Date string; Price int64 }     // date YYYY-MM-DD, price minor units
+      Type (TypeCreateBooking), Status (IN_PROGRESS, COMPENSATING, COMPLETED, FAILED), Step (the 8 steps):
+        type X string + constants + IsValid(), like booking; FailureReason: ROOM_REJECTED, DEADLINE, PHASE_A_ERROR,
+        CAPTURE_FAILED (M3 uses only the first)
+      // newSaga builds the row StartBooking inserts: CREATE_BOOKING, IN_PROGRESS, RESERVING_ROOM, the user's id,
+      // context from req, deadline_at = now + holdTTL. now is a parameter so the test can fix it
+      func newSaga(req StartRequest, now time.Time, holdTTL time.Duration) *Saga
+    + errors.go
+      ErrInvalidInput    = errors.New("invalid input")    // 400: a bad X-User-Id, ReserveRoom INVALID_ARGUMENT
+      ErrRoomNotFound    = errors.New("ROOM_NOT_FOUND")   // 404: ReserveRoom NOT_FOUND
+      ErrRoomUnavailable = errors.New("ROOM_UNAVAILABLE") // 409: ReserveRoom FAILED_PRECONDITION
+      ErrStale           = errors.New("saga changed since it was read") // Save: the version moved
+      ErrNotFound comes in M4a with GetByID
+4. transition (transitions.go): the phase A rows only; each milestone adds its inputs, rows and test rows (Why M3)
+      type Input string    // InputRoomReserved, InputRoomRejected, InputBookingCreated
+      type Command string  // no constants until M4a (ReleaseRoom)
+      type Outcome struct { Status Status; Step Step; FailureReason FailureReason; Commands []Command }
+      // transition is state-machines.md's table: no I/O. ok = false: in doesn't apply here (duplicate, late, lost a
+      // race); the caller logs and ignores it. Outcome.FailureReason "" = keep the saga's (never cleared)
+      func transition(status Status, step Step, in Input) (out Outcome, ok bool)
+          IN_PROGRESS / RESERVING_ROOM   + RoomReserved   -> IN_PROGRESS / CREATING_BOOKING
+          IN_PROGRESS / RESERVING_ROOM   + RoomRejected   -> FAILED / RESERVING_ROOM, ROOM_REJECTED (the step is kept)
+          IN_PROGRESS / CREATING_BOOKING + BookingCreated -> IN_PROGRESS / AWAITING_PAYMENT
+          COMPLETED or FAILED: every input -> ok = false; anything else -> ok = false
+      // next returns a copy of s with out applied (status, step, failure_reason if set); s is not modified
+      func (s *Saga) next(out Outcome) *Saga
+    + transitions_test.go: the 3 rows, then a double loop: every other (status, step, input) gives ok = false
+5. Ports
+    + repository.go (replaces the old comment: GetForUpdate and saga_message_log are gone). The port grows with its
+      callers: GetByID + GetOverdue in M4a, GetByBookingID in M5 (signatures: Notes, saga core)
+      // Create inserts s and returns the stored row (saga_id, version 1, created_at come from the DB); s is not modified
+      Create(ctx context.Context, s *Saga) (*Saga, error)
+      // Save writes s only if the stored version is still s.Version, plus commands (outbox rows, M4a) in one tx.
+      // Returns the stored row (version + 1); s is not modified. ErrStale: another writer saved first, nothing written
+      Save(ctx context.Context, s *Saga, commands []Command) (*Saga, error)
+    + participants.go (the comment stays; PaymentClient comes in M5)
+      type Reservation struct {
+          ID, RoomNumber, RoomType, Currency string
+          TotalAmount                        int64
+          NightlyRates                       []NightlyRate
+      }
+      type RoomClient interface {
+          // Reserve calls ReserveRoom with s.ID, the room and dates from s.Context, s.DeadlineAt as expires_at.
+          // Definite rejection: an error wrapping ErrRoomNotFound, ErrInvalidInput or ErrRoomUnavailable (nothing is
+          // held). Any other error: outcome unknown, a hold may exist
+          Reserve(ctx context.Context, s *Saga) (*Reservation, error)
+      }
+      type BookingClient interface {
+          // Create calls CreateBooking from s after RoomReserved (context, ReservationID, DeadlineAt as expires_at).
+          // No domain errors: in M3 every error means the same (503, the hold stays)
+          Create(ctx context.Context, s *Saga) (bookingID, status string, err error)
+      }
+6. Service (service.go)
+      type Service struct { repository Repository; room RoomClient; booking BookingClient; holdTTL time.Duration }
+      func NewService(repo Repository, room RoomClient, booking BookingClient, holdTTL time.Duration) *Service
+      // StartRequest: POST /bookings, filled by the handler
+      type StartRequest struct {
+          User                      User
+          RoomID                    string
+          CheckInDate, CheckOutDate string // YYYY-MM-DD
+          NumberOfGuests            int
+      }
+      // Started: the data of the 201
+      type Started struct {
+          BookingID, BookingStatus string    // as CreateBooking returned them (PENDING for a new saga)
+          TotalAmount              int64
+          Currency                 string
+          ExpiresAt                time.Time // the saga's deadline_at
+      }
+      func (s *Service) StartBooking(ctx context.Context, req StartRequest) (*Started, error)
+          1. Create(newSaga(req, time.Now().UTC(), s.holdTTL)): an error -> return it (503), nothing is held yet
+          2. room.Reserve
+               rejection -> transition(RoomRejected) -> Save (FAILED, ROOM_REJECTED), return the rejection. A Save error
+                 is logged and the rejection is still returned: it is the client's true answer
+               any other error -> return it (503), save nothing: the saga stays at RESERVING_ROOM for the M4a worker
+          3. transition(RoomReserved) -> next + ReservationID, room number / type, total, currency, rates -> Save
+          4. booking.Create: an error -> return it (503), save nothing: the saga stays at CREATING_BOOKING
+          5. transition(BookingCreated) -> next + BookingID -> Save -> return Started
+          ok = false in 3 or 5 is a bug (this request made the saga): return an error. Any Save error, ErrStale too
+          (no other writer before M4a), -> 503. The saved saga is the returned one (Save doesn't modify its argument)
+          A small helper is worth it, since OnEvent reuses it in M4a:
+          func (s *Service) advance(ctx context.Context, sg *Saga, in Input, fill func(*Saga)) (*Saga, error)
+              transition -> sg.next -> fill (copies the input's data) -> Save
+    + service_test.go with three small fakes (Repository, RoomClient, BookingClient: structs with a func field or a
+      canned answer). Cases: happy path (two Saves, AWAITING_PAYMENT, Started from the reservation + booking); room not
+      found (one Save: FAILED / RESERVING_ROOM / ROOM_REJECTED, errors.Is ErrRoomNotFound); room timeout (no Save, not a
+      rejection); booking error (one Save at CREATING_BOOKING, then an error)
+7. Postgres adapter (adapter/postgres/saga_repository.go)
+      func NewSagaRepository(pool *pgxpool.Pool) *SagaRepository
+      var _ saga.Repository = (*SagaRepository)(nil)
+    + one column list for every RETURNING / SELECT: COALESCE(reservation_id::text, '') AS reservation_id (also
+      booking_id, payment_id, failure_reason), "type" and "status" quoted, like the CREATE file. Writes use
+      NULLIF($n, '')::uuid. context: pgx encodes and scans the struct as JSON
+    + Create: INSERT (type, status, current_step, user_id, context, deadline_at) RETURNING the columns; CollectOneRow +
+      RowToAddrOfStructByName
+    + Save: UPDATE ... SET status, current_step, reservation_id, booking_id, payment_id, context, failure_reason,
+      version = version + 1 WHERE saga_id = $1 AND version = $2 RETURNING the columns. pgx.ErrNoRows -> ErrStale.
+      type, user_id and deadline_at are written once by Create (the open decision may add deadline_at in M5)
+      len(commands) > 0 -> return an error ("outbox not built until M4a"): a command must never vanish silently.
+      No tx yet: one statement. M4a wraps UPDATE + outbox.Insert in one tx
+8. gRPC clients (adapter/grpcclient; the package implies the client, so Room / Booking)
+      type Room struct { client roomv1.RoomServiceClient; timeout time.Duration }
+      func NewRoom(conn *grpc.ClientConn, timeout time.Duration) *Room
+      var _ saga.RoomClient = (*Room)(nil)
+      func (r *Room) Reserve(ctx context.Context, s *saga.Saga) (*saga.Reservation, error)
+          ctx, cancel := context.WithTimeout(ctx, r.timeout); defer cancel(); expires_at = timestamppb.New(s.DeadlineAt)
+          error: st, ok := status.FromError(err); ok = false -> unknown. NotFound -> ErrRoomNotFound; InvalidArgument ->
+          wraps ErrInvalidInput and keeps room's message (it names the field, for the 400); FailedPrecondition -> wraps
+          ErrRoomUnavailable with the message (RESERVATION_RELEASED can't happen: a new saga_id per request); every other
+          code (DeadlineExceeded, Unavailable, Internal...) -> returned wrapped = unknown outcome
+      type Booking struct { client bookingv1.BookingServiceClient; timeout time.Duration }
+      func NewBooking(conn *grpc.ClientConn, timeout time.Duration) *Booking
+      var _ saga.BookingClient = (*Booking)(nil)
+      func (b *Booking) Create(ctx context.Context, s *saga.Saga) (bookingID, status string, err error)
+          maps every CreateBookingRequest field from s; expires_at = s.DeadlineAt, so the reservation, the booking and
+          the 201 share one deadline
+      doc.go: "to and from the contracts/<svc>/v1 protos" stays true
+9. REST (adapter/handler)
+    + dto.go
+      type CreateBookingRequest struct { RoomID, CheckInDate, CheckOutDate string; NumberOfGuests int } // snake_case json
+      func (r CreateBookingRequest) ToStartRequest(u saga.User) saga.StartRequest
+      type CreateBookingResponse struct {
+          BookingID   string    `json:"booking_id"`
+          Status      string    `json:"status"`
+          TotalAmount int64     `json:"total_amount"`
+          Currency    string    `json:"currency"`
+          ExpiresAt   time.Time `json:"expires_at"` // ends in Z: deadline_at is made with time.Now().UTC()
+      }
+      func toCreateBookingResponse(st *saga.Started) CreateBookingResponse
+    + handler.go
+      type Handler struct { svc *saga.Service }
+      func New(s *saga.Service) *Handler
+      func (h *Handler) CreateBooking(c *gin.Context)
+          userFromHeaders -> ShouldBindJSON (400) -> ctx := context.WithoutCancel(c.Request.Context()) (Why M3) ->
+          StartBooking -> 201, or writeError
+      // userFromHeaders: X-User-Id must be a UUID (canonical form) else ErrInvalidInput; X-User-Name, X-User-Email,
+      // X-User-Phone-Number as sent (their checks: M7). Phase 3: a Cognito middleware fills the same saga.User
+      func userFromHeaders(c *gin.Context) (saga.User, error)
+      // ErrInvalidInput -> 400 {"error": err.Error()}; ErrRoomNotFound -> 404 {"error": "ROOM_NOT_FOUND"};
+      // ErrRoomUnavailable -> 409 {"error": "ROOM_UNAVAILABLE"}; else logged -> 503 {"error": "service unavailable"}
+      func writeError(c *gin.Context, err error)
+      StartPaymentTxn goes away until M5: an empty Gin handler answers 200 with an empty body
+    + router.go: /health + POST /bookings; the /payment route comes back in M5
+10. cmd/main.go, same as booking's without the gRPC server: time.Local = time.UTC, slog.SetDefault, config.Load,
+    pgxpool.New + Ping, gin.EnableJsonDecoderDisallowUnknownFields() (like room), one grpc.NewClient per participant
+    with insecure credentials (defer conn.Close()), repo -> grpcclient.NewRoom / NewBooking -> saga.NewService ->
+    handler.New -> HTTP server, graceful shutdown (5 s). grpc.NewClient doesn't connect at start: the orchestrator
+    starts while room is down, and the first call gets UNAVAILABLE -> 503. Then go mod tidy
+11. Optional (or later): one trace_id across the three services. Logger v1.2.0 adds grpclogger.UnaryClientInterceptor():
+    puts logger.GetTraceID(ctx) into the outgoing metadata x-trace-id, the key the server interceptor already reads;
+    main.go passes grpc.WithChainUnaryInterceptor(...) to both clients. Without it each service logs its own trace_id
+    and the saga_id still links the three logs
+12. Done when (Postman + DB; room + booking running, a room with inventory)
+    + 201: booking_id, status PENDING, total_amount, currency, expires_at ending in Z at about now + 15 min
+    + DB: saga IN_PROGRESS / AWAITING_PAYMENT, version 3, reservation_id + booking_id set, context has user, room,
+      dates and rates, failure_reason NULL. reservation RESERVED and booking PENDING carry this saga_id and its
+      deadline_at as expires_at
+    + unknown room -> 404 ROOM_NOT_FOUND; the same room and dates again -> 409 ROOM_UNAVAILABLE; malformed check_in_date
+      or check-in in the past -> 400 with room's message. Each: saga FAILED / RESERVING_ROOM, ROOM_REJECTED, version 2
+    + X-User-Id missing or not a UUID, malformed JSON, an unknown JSON field -> 400 and no saga row
+    + room-service stopped -> 503, saga IN_PROGRESS / RESERVING_ROOM. booking-service stopped -> 503, saga at
+      CREATING_BOOKING with reservation_id, reservation RESERVED (the hold stays until M4a: rebuild the room DB)
+    + number_of_guests 0 -> 503 (CreateBooking INVALID_ARGUMENT; M7 makes it 400 before the saga starts)
+    + logs: "HTTP request completed" in the orchestrator, "gRPC request completed" with the saga_id in room and booking
+    + go test ./... passes (transitions, service)
+    + Docs (same pass): CLAUDE.md orchestrator row, go test line, Commands (the orchestrator needs room + booking
+      running); data-model.md (saga_step enum, the index changes); contracts.md (error body {"error": "ROOM_NOT_FOUND"});
+      hexagonal-structure.md orchestrator tree (errors.go; worker and kafka are M4a); Postman (orchestrator_url + create
+      booking with the X-User-* headers)
+
+Why M3 (proposed 2026-11-15)
+- Dates and rate dates stay YYYY-MM-DD strings in the saga: the orchestrator never computes with them (room checks
+  them, booking checks the rates), and the context JSONB gets the same format as reservations and bookings without a
+  third MarshalJSON
+- "" for an id not known yet, not *string: the core only compares with "", and the NULL mapping is COALESCE / NULLIF in
+  one adapter file. room's RoomReleased keeps *string: there the JSON message must carry null
+- saga_step is a Postgres ENUM, like every status column (CLAUDE.md): with TEXT a typo in a step would be stored and
+  the saga would never match a row of the table again
+- The port and the transition table grow with their callers: M3 = Create + Save and the 3 phase A rows. The other way,
+  the whole table now: pure and cheap to test, but inputs without callers and nothing to run them
+- context.WithoutCancel in the handler: a client that disconnects after ReserveRoom would cancel CreateBooking and the
+  Saves, and the saga would stop halfway for no reason. Values survive (trace_id); each call keeps its own timeout, so
+  the request stays bounded (2 x GRPC_TIMEOUT + DB)
+- A rejection whose Save fails still answers the rejection: nothing is held, and the M4a worker's ReleaseRoom finds no
+  reservation (RoomReleased with a nil reservation_id)
+- No idempotency on POST /bookings in v1: a retry after a 503 starts a second saga, and a double click gets 409 from the
+  exclusion constraint (G2, Idempotency-Key)
 
 Why M2 (accepted 2026-11-04)
 - One Booking struct: Detail only existed to join the old nightly_rates table. With JSONB there is nothing to join
@@ -176,9 +426,9 @@ Why phase numbers (decided 2026-11-03)
 
 Notes for later milestones
 - Every handler from M3 on: read without a lock -> the core decides -> one conditional write (Why design review)
-- M3: saga core (internal/saga)
+- Saga core (internal/saga), every milestone; M3 builds the phase A part (M3 steps 3-6)
     + transition(status Status, step Step, in Input) (out Outcome, ok bool): the table of state-machines.md, no I/O
-      type Outcome struct { Status Status; Step Step; FailureReason string; Commands []Command }
+      type Outcome struct { Status Status; Step Step; FailureReason FailureReason; Commands []Command }
       ok = false: in doesn't apply here (duplicate, late, lost a race); the caller logs and ignores it
     + a row that ends the saga changes Status and keeps Step (BookingExpired at EXPIRING_BOOKING -> FAILED, step still
       EXPIRING_BOOKING): COMPLETED and FAILED are never steps. With status COMPLETED or FAILED every input gives
@@ -210,30 +460,11 @@ Notes for later milestones
       poll reads again); StartBooking -> 503 (the worker released the saga during the request); StartPayment -> read the
       saga once more: still AWAITING_PAYMENT with the same payment_id -> 200, else 409 BOOKING_NOT_PAYABLE. StartPayment
       doesn't Save when the saga already has this payment_id (a page refresh writes nothing)
-- M3: ReserveRoom error -> saga
-    + definite rejection (NOT_FOUND, INVALID_ARGUMENT, FAILED_PRECONDITION) -> saga FAILED (failure_reason ROOM_REJECTED),
-      nothing to release, reply 404 / 400 / 409
-    + unknown outcome (timeout, UNAVAILABLE, INTERNAL) or any CreateBooking error -> reply 503 and save nothing: the saga
-      stays IN_PROGRESS at its step, the M4a deadline worker releases the room at deadline_at, and from M4b a PENDING
-      booking (if one was created) is expired. Until M4a exists the hold stays: rebuild the DB. Phase D at once = M7
-- M3: the user comes from headers, read in adapter/handler (no port: reading a request is the adapter's job):
-  X-User-Id (a UUID, else 400: saga_instances.user_id is UUID, so a bad value would fail the INSERT as a 500),
-  X-User-Name, X-User-Email, X-User-Phone-Number (may be empty). The handler fills a core struct
-  saga.User{ID, Name, Email, PhoneNumber string} and passes it to StartBooking / StartPayment. Phase 3: a Cognito
-  middleware fills the same struct. The other request checks stay in M7
-- M3: go.mod wiring first, like M2 step 1: replace contracts + platform, pgx, grpc, logger v1.1.0 (now v1.0.0)
-- M3: saga_instances migration is behind data-model.md: add deadline_at (= ReserveRoom expires_at) + user_id UUID +
-  idx_saga_deadline + failure_reason TEXT, reservation_id TEXT -> UUID; keep version. New drop_all.sql (the CREATE file
-  changes, so the DB is rebuilt): saga_instances, saga_message_log, function set_updated_at, enums saga_status,
-  saga_type, direction, message_type; M4a adds outbox to it
-- M3: failure_reason is NULL while IN_PROGRESS and set in the Save that leaves the main line, never cleared: ROOM_REJECTED
-  (M3, FAILED at RESERVING_ROOM), DEADLINE (M4a, the worker's Save to RELEASING_ROOM), PHASE_A_ERROR (M7; until then a
+- failure_reason, every milestone: NULL while IN_PROGRESS and set in the Save that leaves the main line, never
+  cleared: ROOM_REJECTED (M3, FAILED at RESERVING_ROOM), DEADLINE (M4a, the worker's Save to RELEASING_ROOM), PHASE_A_ERROR (M7; until then a
   phase A error is released by the worker and recorded as DEADLINE), CAPTURE_FAILED (M7). ReleaseRoom.reason and
   ExpireBooking.reason are read from it, so both are DEADLINE or PHASE_A_ERROR
-- M3: orchestrator config has none of these yet: ROOM_GRPC_ADDR, BOOKING_GRPC_ADDR, GRPC_TIMEOUT (3s), HOLD_TTL (15m); later
-  PAYMENT_GRPC_ADDR + PAYMENT_GRPC_TIMEOUT (10s) in M5, DEADLINE_POLL (10s) in M4a. Durations: time.ParseDuration. Each
-  client call gets its own context.WithTimeout
-- M3: deadline_at made in Go: time.Now().UTC().Add(HOLD_TTL), so the 201's expires_at ends in Z like later reads
+- Config after M3: DEADLINE_POLL (10s) in M4a, PAYMENT_GRPC_ADDR + PAYMENT_GRPC_TIMEOUT (10s) in M5
 - M4a: platform/outbox
     + type Message struct { ID, Topic, Key string; Payload []byte }: ID = the envelope's message_id, Key = saga_id,
       Payload = the envelope as JSON
@@ -404,16 +635,11 @@ Cleanup (any time)
 
 Code changes from the doc sync (2026-11-11: the docs now describe these, the code doesn't yet; for me to write)
 - Comments only, any time
-    + orchestrator-service/internal/saga/repository.go: says "Create, GetForUpdate, Save" and "saga_message_log, the
-      outbox" -> Create, GetByID, GetByBookingID, Save, GetOverdue (Notes, M3); Save writes the outbox table
     + booking-service and payment-service internal/adapter/kafka/mapper.go: "to and from ... domain types" -> incoming
       messages only; outgoing events are mapped in adapter/postgres
     + contracts/booking/v1/messages.go: ExpireBooking.Reason gets the comment //DEADLINE, PHASE_A_ERROR (the same values
       as ReleaseRoom.Reason in room/v1/messages.go)
 - With their milestone (signatures and rules: Notes for later milestones)
-    + M3: orchestrator-service/db/migration/create_saga_instances.sql (deadline_at, user_id UUID, failure_reason,
-      reservation_id UUID, idx_saga_deadline; keep version) + a new drop_all.sql; config/config.go + .env.example (the
-      new variables); go.mod wiring
     + M4a: delete orchestrator-service/db/migration/create_saga_message_log.sql; create_outbox_table.sql in orchestrator +
       room; room's and orchestrator's drop_all.sql; platform/outbox + platform/kafka (pgx and franz-go go into
       platform/go.mod)
