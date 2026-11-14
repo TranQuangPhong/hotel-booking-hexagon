@@ -155,13 +155,14 @@ booking-service/
 ├── config/config.go                  # UC1: + GRPC_PORT
 ├── internal/
 │   ├── booking/                      ===== CORE =====
-│   │   ├── booking.go                # Booking, statuses (PENDING, BOOKED, EXPIRED, …)
-│   │   ├── nightly_rate.go
-│   │   ├── repository.go             # port (+ UC1: GetBySagaID, UpdateStatus, AddEvent)
+│   │   ├── booking.go                # Booking, statuses (PENDING, BOOKED, EXPIRED, …), validate
+│   │   ├── nightly_rate.go           # NightlyRate, JSON date as YYYY-MM-DD
+│   │   ├── errors.go                 # ErrInvalidInput, ErrNotFound
+│   │   ├── repository.go             # port: GetByID, GetByUserID, Create (+ UC1: GetBySagaID, UpdateStatus, AddEvent)
 │   │   └── service.go                # Create (idempotent by sagaID), UC1: Confirm, Expire
 │   │
 │   └── adapter/
-│       ├── handler/                  # REST /bookings/api/v1 (GET list, GET by id)
+│       ├── handler/                  # REST /bookings/api/v1/:id (no list route until UC2 / FE)
 │       ├── grpc/server.go            # UC1: CreateBooking
 │       ├── kafka/                    # UC1: booking.commands consumer + mapper
 │       └── postgres/booking_repository.go

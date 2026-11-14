@@ -42,8 +42,7 @@ Details: doc/uc1-create-booking/
 4. Booking service
 - Booking order: user & room snapshot, dates, price per night
 - REST
-    + GET /bookings/api/v1
-    + GET /bookings/api/v1/{id}       - client polls booking status
+    + GET /bookings/api/v1/{id}       - client polls booking status (no list route until UC2 / FE)
 - gRPC
     + CreateBooking
 - Kafka

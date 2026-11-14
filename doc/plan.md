@@ -45,13 +45,18 @@ Done
   REST: GET /:id only, own BookingResponse + NightlyRateResponse DTO, parseBookingID -> 400, writeError 404 / logged 500.
   booking.Booking has db tags only. Builds + go test passes; not run yet (needs step 7)
 - M2 step 7 (2026-11-13): main.go same as room's (HTTP + gRPC, grpclogger before recovery, graceful stop of both),
-  go-grpc-middleware/v2 direct after tidy; both main.go have the same commented interceptor chain. Not run yet (step 8)
+  go-grpc-middleware/v2 direct after tidy; both main.go have the same commented interceptor chain
+- M2 step 8 (2026-11-15): run + verified with grpcurl, curl and DB checks: every done-when item passes, plus 9 extra
+  INVALID_ARGUMENT cases (rate date out of order / duplicate, price 0, currency, room, ids, email). Along the way: missing
+  expires_at -> "expires_at: missing" (not the proto nil-Timestamp text), core errors name the field by its flat wire name
+  ("number_of_guests: must be > 0", "nightly_rates[1].date: ..."). Docs synced (CLAUDE.md, contracts, flows, services,
+  hexagonal-structure, Postman). M2 done
 
 UC1 build order (main line of each flow first, decided 2026-11-11; done-when per milestone: uc1 README.md section 6)
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
-- M2: Booking CreateBooking gRPC (idempotent by saga_id)   <- NOW, steps below
+- M2: Booking CreateBooking gRPC, idempotent by saga_id (done 2026-11-15)
 - M3: Orchestrator phase A: saga migration + core + Save; POST /bookings -> ReserveRoom -> CreateBooking -> 201.
-  No outbox, no Kafka
+  No outbox, no Kafka   <- NOW (steps not detailed yet)
 - M4a: infra/kafka, platform outbox (Insert + Poller) + consumer loop, errgroup main.go; deadline worker -> ReleaseRoom
   -> RoomReleased
 - M4b: ExpireBooking -> BookingExpired -> saga FAILED
@@ -61,32 +66,13 @@ UC1 build order (main line of each flow first, decided 2026-11-11; done-when per
   then good-to-have.md
 - Rule for M3-M6: an edge case met on the way gets one line under M7 (Notes), not code
 
-Next step: M2 step 8 (run booking-service, grpcurl + Postman checks, doc sync)
+Next step: M3, detail its steps first (Notes: "M3: go.mod wiring first, like M2 step 1")
 Open decision (review round 2, 2026-11-12; decide before M5): starting payment extends the hold to the Stripe session's
   end (StartPayment's Save sets deadline_at = the session's expires_at + 1 min; CreateCheckoutSessionResponse gets
   expires_at). Today a user who opens the page at minute 10 and pays at minute 16 sees Stripe's success page and then an
   EXPIRED booking (the void only protects the money). Cost: a user who opens the page and leaves holds the room up to
   ~46 min, and bookings.expires_at goes stale (the client uses the expires_at of the payment response). Other fix: G1
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
-
-M2: Booking CreateBooking gRPC
-booking-service predates the UC1 schema: create_tables.sql has the right columns, but the Go code still reads a nightly_rates
-table, has old statuses, and the adapter doesn't implement its port. Same shape as room's M1
-
-8. Done when (grpcurl + Postman)
-    + Each gRPC call logs "gRPC request completed" with trace_id and saga_id (grpclogger is wired)
-    + CreateBooking -> booking_id + PENDING; the same saga_id again -> same booking_id and no new row, even when the
-      second request has other valid data
-    + DB: nightly_rates has "date":"YYYY-MM-DD"; status and payment_status are PENDING
-    + INVALID_ARGUMENT: malformed saga_id, no user, no expires_at, check-out = check-in, guests 0, no rates, one rate
-      missing, prices that don't sum to the total
-    + GET by id: stay and rate dates are YYYY-MM-DD, expires_at / created_at end in Z, no saga_id; unknown id -> 404,
-      malformed -> 400
-    + go test ./... passes
-    + Docs (same pass): CLAUDE.md status row, naming example (GetDetailsByUserID; keep UpdateStatus: the M4b booking port has it again), go test line (+ booking-service
-      internal/booking); contracts.md GET by id errors (+ 400 malformed id) and user.phone_number (may be empty); flows.md
-      phase A (CreateBooking also takes reservationId + currency; rates live in the row); services.md and
-      hexagonal-structure.md (no list route, errors.go); Postman (booking_url + booking get by id)
 
 Why M2 (accepted 2026-11-04)
 - One Booking struct: Detail only existed to join the old nightly_rates table. With JSONB there is nothing to join
@@ -443,7 +429,7 @@ Docs to sync
 - Nothing open. Synced 2026-11-11: uc1 README, flows, state-machines, data-model, contracts, good-to-have,
   hexagonal-structure, services, use-cases, CLAUDE.md. architecture_uc_create_order.excalidraw was checked: it draws
   only the main line (no deadline, release or void arrows), so nothing in it became wrong
-- The docs listed in M2 step 8 are not part of this sync: they stay with that step
+- Synced 2026-11-15 (M2 step 8): CLAUDE.md, contracts, flows, services, hexagonal-structure
 
 After UC1
 - UC2 cancel booking, UC3 payment refund: TODO, not designed

@@ -28,8 +28,8 @@ sequenceDiagram
     else reserved
         R-->>O: reservationId, nightlyRates, total, currency, room snapshot
         Note over O: save to context, step CREATING_BOOKING
-        O->>B: CreateBooking(sagaId, user + room snapshot, dates, guests, nightlyRates, total, expiresAt)
-        Note over B: INSERT booking PENDING + nightly_rates
+        O->>B: CreateBooking(sagaId, reservationId, user + room snapshot, dates, guests, nightlyRates, total, currency, expiresAt)
+        Note over B: INSERT booking PENDING (nightly_rates is a JSONB column of the row)
         B-->>O: bookingId
         Note over O: save bookingId, step AWAITING_PAYMENT
         O-->>C: 201 bookingId, PENDING, total, currency, expiresAt

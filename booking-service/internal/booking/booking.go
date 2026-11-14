@@ -82,37 +82,37 @@ func (s PaymentStatus) IsValid() bool {
 }
 
 // validate rejects what proto3 lets through: a forgotten field arrives as 0 or "", not as an error. No I/O.
-// The error names the field, never its value: the gRPC message lands in the access log, and name, email
-// and phone are personal data.
+// The error names the field by its flat wire name (user_name, as the adapters do), never its value: the gRPC
+// message lands in the access log, and name, email and phone are personal data.
 func (b *Booking) validate() error {
 	if !b.CheckInDate.Before(b.CheckOutDate) {
-		return fmt.Errorf("bad input date range: %w", ErrInvalidInput)
+		return fmt.Errorf("check_out_date: must be after check_in_date: %w", ErrInvalidInput)
 	}
 
 	if b.NumberOfGuests <= 0 {
-		return fmt.Errorf("bad input number of guests: %w", ErrInvalidInput)
+		return fmt.Errorf("number_of_guests: must be > 0: %w", ErrInvalidInput)
 	}
 
 	// Phone may be empty: users has no phone column
 	if b.UserName == "" {
-		return fmt.Errorf("bad input user name: %w", ErrInvalidInput)
+		return fmt.Errorf("user_name: missing: %w", ErrInvalidInput)
 	}
 	if b.UserEmail == "" {
-		return fmt.Errorf("bad input user email: %w", ErrInvalidInput)
+		return fmt.Errorf("user_email: missing: %w", ErrInvalidInput)
 	}
 	if b.RoomNumber == "" {
-		return fmt.Errorf("bad input room number: %w", ErrInvalidInput)
+		return fmt.Errorf("room_number: missing: %w", ErrInvalidInput)
 	}
 	if b.RoomType == "" {
-		return fmt.Errorf("bad input room type: %w", ErrInvalidInput)
+		return fmt.Errorf("room_type: missing: %w", ErrInvalidInput)
 	}
 
 	if len(b.Currency) != 3 {
-		return fmt.Errorf("bad input currency: %w", ErrInvalidInput)
+		return fmt.Errorf("currency: must be 3 uppercase letters (ISO 4217): %w", ErrInvalidInput)
 	}
 	for _, c := range b.Currency {
 		if c < 'A' || c > 'Z' {
-			return fmt.Errorf("bad input currency: %w", ErrInvalidInput)
+			return fmt.Errorf("currency: must be 3 uppercase letters (ISO 4217): %w", ErrInvalidInput)
 		}
 	}
 
@@ -121,20 +121,20 @@ func (b *Booking) validate() error {
 	var sum int64
 	for i, rate := range b.NightlyRates {
 		if !rate.Date.Equal(b.CheckInDate.AddDate(0, 0, i)) {
-			return fmt.Errorf("bad input nightly rate date: %w", ErrInvalidInput)
+			return fmt.Errorf("nightly_rates[%d].date: not night %d of the stay (one rate per night, in order): %w", i, i+1, ErrInvalidInput)
 		}
 		if rate.Price <= 0 {
-			return fmt.Errorf("bad input nightly rate price: %w", ErrInvalidInput)
+			return fmt.Errorf("nightly_rates[%d].price: must be > 0: %w", i, ErrInvalidInput)
 		}
 		sum += rate.Price
 	}
 	if !b.CheckInDate.AddDate(0, 0, len(b.NightlyRates)).Equal(b.CheckOutDate) {
-		return fmt.Errorf("bad input nightly rates do not cover the stay: %w", ErrInvalidInput)
+		return fmt.Errorf("nightly_rates: need one rate per night of the stay: %w", ErrInvalidInput)
 	}
 
 	// Also catches a forgotten total: at least one night and every price > 0, so the sum is never 0
 	if sum != b.TotalAmount {
-		return fmt.Errorf("bad input total amount: %w", ErrInvalidInput)
+		return fmt.Errorf("total_amount: must equal the sum of nightly_rates prices: %w", ErrInvalidInput)
 	}
 
 	return nil

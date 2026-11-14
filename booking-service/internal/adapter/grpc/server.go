@@ -76,15 +76,20 @@ func toBooking(req *bookingv1.CreateBookingRequest) (*booking.Booking, error) {
 	}
 
 	rates := make([]booking.NightlyRate, 0, len(req.GetNightlyRates()))
-	for _, rate := range req.GetNightlyRates() {
+	for i, rate := range req.GetNightlyRates() {
 		d, err := time.Parse(time.DateOnly, rate.GetDate())
 		if err != nil {
-			return nil, fmt.Errorf("nightly_rate date %q: %w", rate.GetDate(), booking.ErrInvalidInput)
+			return nil, fmt.Errorf("nightly_rates[%d].date %q: %w", i, rate.GetDate(), booking.ErrInvalidInput)
 		}
 		rates = append(rates, booking.NightlyRate{Date: d, Price: rate.GetPrice()})
 	}
+	// nil first: CheckValid reports a missing Timestamp as "proto: invalid nil Timestamp", which means nothing
+	// to the caller
+	if req.GetExpiresAt() == nil {
+		return nil, fmt.Errorf("expires_at: missing: %w", booking.ErrInvalidInput)
+	}
 	if err := req.GetExpiresAt().CheckValid(); err != nil {
-		return nil, fmt.Errorf("expires_at: %w: %w", err, booking.ErrInvalidInput)
+		return nil, fmt.Errorf("expires_at: out of range: %w", booking.ErrInvalidInput)
 	}
 
 	// Name, email, phone, room number / type, guests, total and currency are copied as sent: validate checks

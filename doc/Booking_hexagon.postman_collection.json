@@ -1,10 +1,10 @@
 {
   "info": {
-    "_postman_id": "88b1f7d8-67d1-4b2f-9b70-86e21f05b48a",
+    "_postman_id": "f00aa1ce-ccc4-4a4a-a4d8-e7bd4026d96e",
     "name": "Booking hexagon",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "16233051",
-    "_collection_link": "https://go.postman.co/collection/16233051-88b1f7d8-67d1-4b2f-9b70-86e21f05b48a?source=collection_link"
+    "_collection_link": "https://go.postman.co/collection/16233051-f00aa1ce-ccc4-4a4a-a4d8-e7bd4026d96e?source=collection_link"
   },
   "item": [
     {
@@ -280,6 +280,30 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "booking_service",
+      "item": [
+        {
+          "name": "get by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{booking_url}}/api/v1/e589b7c2-3a5f-4ed1-a88e-7693884d4bf0",
+              "host": [
+                "{{booking_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "e589b7c2-3a5f-4ed1-a88e-7693884d4bf0"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "event": [
@@ -309,11 +333,15 @@
   "variable": [
     {
       "key": "user_url",
-      "value": "localhost:8081/users"
+      "value": "localhost:8181/users"
+    },
+    {
+      "key": "booking_url",
+      "value": "localhost:8182/bookings"
     },
     {
       "key": "room_url",
-      "value": "localhost:8083/rooms"
+      "value": "localhost:8183/rooms"
     }
   ]
 }

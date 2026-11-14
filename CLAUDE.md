@@ -55,7 +55,7 @@ A simple hotel booking system, built as Go microservices with **hexagonal archit
 |---|---|---|---|
 | `user-service` | Done (CRUD APIs tested) | PostgreSQL | Profile only; Cognito handles auth (phase 3) |
 | `room-service` | Room CRUD + inventory edit (`PATCH`) done (creating a room opens 12 months of inventory); `ReserveRoom` gRPC done (M1) | PostgreSQL (+ Redis lock later) | Rooms, monthly inventory (JSONB days), reservations |
-| `booking-service` | WIP (M2): core, Postgres adapter, `CreateBooking` gRPC and `GET /:id` built, not run yet; current step in `doc/plan.md` | PostgreSQL | Booking stores user and room **snapshots** plus nightly rates |
+| `booking-service` | `CreateBooking` gRPC (idempotent by `saga_id`) and `GET /:id` done (M2), tested with grpcurl + Postman | PostgreSQL | Booking stores user and room **snapshots** plus nightly rates |
 | `orchestrator-service` | Skeleton only | PostgreSQL | `saga_instances` schema designed; it gets the same `outbox` table as the other services |
 | `payment-service` | Skeleton only (config done) | PostgreSQL + Stripe sandbox | |
 | `notification-service` | Skeleton only | None in v1 (logs the notification); MongoDB + AWS SES in phase 3 | v1 is a Kafka consumer only: no HTTP server, no DB |
@@ -110,7 +110,7 @@ Rules:
 - Timestamps are RFC 3339 UTC on every API and message. Every `main.go` with a DB starts with `time.Local = time.UTC`, so `TIMESTAMPTZ` scans as UTC; a timestamp made in Go uses `time.Now().UTC()`.
 - IDs are UUIDs (`gen_random_uuid()`), handled as `string` in Go.
 - **Money is stored in minor units as `int64`** (cents), with a separate `currency CHAR(3)`.
-- Names don't repeat their package: `user.Service`, `user.Repository`, `user.NewService`, `handler.Handler` + `handler.New`, `config.DB`. The package's main entity is the exception (`room.Room`, `config.Config`). Core port/service methods drop the entity too: `GetAll`, `GetByID`, `Create`, `UpdateStatus`, `GetDetailsByUserID` (plural for slices). gRPC RPC names (`CreateBooking`) and HTTP handler methods (`h.GetUsers`) keep it, because their package doesn't imply the entity. Core files are `repository.go` / `service.go`; adapter files keep the entity prefix (`postgres/room_repository.go`).
+- Names don't repeat their package: `user.Service`, `user.Repository`, `user.NewService`, `handler.Handler` + `handler.New`, `config.DB`. The package's main entity is the exception (`room.Room`, `config.Config`). Core port/service methods drop the entity too: `GetAll`, `GetByID`, `Create`, `UpdateStatus`, `GetByUserID`, `GetInventories` (plural for slices). gRPC RPC names (`CreateBooking`) and HTTP handler methods (`h.GetUsers`) keep it, because their package doesn't imply the entity. Core files are `repository.go` / `service.go`; adapter files keep the entity prefix (`postgres/room_repository.go`).
 - One name per field everywhere (REST, gRPC, Kafka, DB), `snake_case` in JSON. Flat structures prefix the owner (`user_phone_number`, `check_in_date`); nested objects drop it (`user.phone_number`, not `user.phone` or `user.user_phone_number`).
 - Status enums are Go `type X string` constants with `IsValid()`, mirrored by Postgres `ENUM` types.
 - Errors are wrapped with context: `fmt.Errorf("failed to ...: %w", err)`. Log the error value, not its string: `"error", err` / `slog.Any("error", err)`.
@@ -141,7 +141,7 @@ My setup:
 
 ## Roadmap
 
-1. **Phase 1, local:** finish service APIs, then implement **UC1 create booking end to end** (orchestrator → room → booking → payment → notify). ← *current focus*: the UC1 build order M1–M7 (`doc/uc1-create-booking/README.md` section 6; M3–M6 build the main line only, M7 hardens). M1 is done; M2 is in progress (current step in `doc/plan.md`).
+1. **Phase 1, local:** finish service APIs, then implement **UC1 create booking end to end** (orchestrator → room → booking → payment → notify). ← *current focus*: the UC1 build order M1–M7 (`doc/uc1-create-booking/README.md` section 6; M3–M6 build the main line only, M7 hardens). M1 and M2 are done; M3 is next (current step in `doc/plan.md`).
 2. **Phase 2, local deployment:** deploy and test the full flow locally (no AWS Gateway, Cognito, or Lambda yet).
 3. **Phase 3, AWS:** API Gateway, Cognito (plus a Lambda to sync users), SES, deployment.
 4. **Phase 4:** CI/CD, monitoring, and logging.

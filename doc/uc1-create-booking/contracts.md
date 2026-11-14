@@ -22,7 +22,7 @@ Every service uses the same pattern: **`/<service-prefix>/health`** and **`/<ser
 |---|---|---|---|---|
 | Orchestrator | `POST /orchestrator/api/v1/bookings` | user headers; `room_id, check_in_date, check_out_date, number_of_guests` | `201` `booking_id, status, total_amount, currency, expires_at` | `400` · `404 ROOM_NOT_FOUND` · `409 ROOM_UNAVAILABLE` · `503` |
 | Orchestrator | `POST /orchestrator/api/v1/bookings/{id}/payment` | user headers | `200` `checkout_url, amount, currency, expires_at` | `404` (not found / not owner) · `409 BOOKING_NOT_PAYABLE` · `503` |
-| Booking | `GET /bookings/api/v1/{id}` | — | `200` booking | `404` |
+| Booking | `GET /bookings/api/v1/{id}` | — | `200` booking (no `saga_id`) | `400` malformed id · `404` |
 | Payment | `POST /payments/api/v1/webhooks/stripe` | raw body + `Stripe-Signature` | `200` | `400` bad signature |
 
 **User headers** (v1, read by the orchestrator's handler; Cognito replaces them in Phase 3): `X-User-Id` (UUID, else `400`), `X-User-Name`, `X-User-Email`, `X-User-Phone-Number` (may be empty).
@@ -40,7 +40,7 @@ Every service uses the same pattern: **`/<service-prefix>/health`** and **`/<ser
 | Method | Request | Response | Errors |
 |---|---|---|---|
 | `room.v1.RoomService/ReserveRoom` | `saga_id, room_id, check_in_date, check_out_date, expires_at` | `reservation_id, room_number, room_type, currency, total_amount, nightly_rates[]{date YYYY-MM-DD, price}` | `INVALID_ARGUMENT` · `NOT_FOUND` · `FAILED_PRECONDITION` `ROOM_UNAVAILABLE` / `RESERVATION_RELEASED` |
-| `booking.v1.BookingService/CreateBooking` | `saga_id, reservation_id, user{id, name, email, phone_number}, room{id, number, type}, check_in_date, check_out_date, number_of_guests, nightly_rates[], total_amount, currency, expires_at` | `booking_id, status` | `INVALID_ARGUMENT` |
+| `booking.v1.BookingService/CreateBooking` | `saga_id, reservation_id, user{id, name, email, phone_number (may be empty)}, room{id, number, type}, check_in_date, check_out_date, number_of_guests, nightly_rates[], total_amount, currency, expires_at` | `booking_id, status` | `INVALID_ARGUMENT` (message names the field, never its value) |
 | `payment.v1.PaymentService/CreateCheckoutSession` | `saga_id, booking_id, amount, currency` | `payment_id, checkout_url` | `UNAVAILABLE` (Stripe) · `FAILED_PRECONDITION` (session no longer open) |
 
 ## 3. Kafka topics
