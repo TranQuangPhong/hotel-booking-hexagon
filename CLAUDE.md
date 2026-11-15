@@ -136,7 +136,7 @@ My setup:
 - Windows + PowerShell: commands you give me must run there.
 - I run the services and test with Postman / grpcurl myself.
 - The local DB is a test DB and you are its admin through the `pg-*` MCP servers: query and change it freely (start DDL with `SET ROLE booking`). Docker is usually off, so when a task needs the real DB, tell me and I'll start it.
-- Local DBs are throwaway in phase 1: change the `CREATE` file and rebuild (room-service has `drop_all.sql`). No `ALTER` migrations.
+- Local DBs are throwaway in phase 1: change the `CREATE` file and rebuild (room, booking and orchestrator each have a `drop_all.sql`). No `ALTER` migrations.
 - `.gitattributes` forces LF, so `gofmt -l .` from the repo root should print nothing. Anything it lists is a real formatting problem.
 
 ## Roadmap

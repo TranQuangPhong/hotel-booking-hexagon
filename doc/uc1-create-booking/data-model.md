@@ -32,21 +32,36 @@ No inbox tables in v1: the status check makes handlers idempotent (G5).
 
 ## Orchestrator
 
+Done in `orchestrator-service/db/migration/create_saga_instances.sql` (M3 step 2), rebuilt with its `drop_all.sql` like Room.
+
 `saga_instances`:
 
 | Column | Change | Why |
 |---|---|---|
+| `type saga_type` | enum is `CREATE_BOOKING` only | UC2 / UC3 add theirs with `ALTER TYPE … ADD VALUE` |
+| `status saga_status`, `context JSONB` | no `DEFAULT` | the insert always sets them, so a forgotten one is an error |
+| `current_step saga_step` | `TEXT` → enum, the 8 steps of [state-machines.md](state-machines.md) | a typo in a step can't be stored |
 | `user_id UUID NOT NULL` | add | owner check on `POST …/payment`. The handler rejects an `X-User-Id` that isn't a UUID with `400` before the insert |
 | `deadline_at TIMESTAMPTZ NOT NULL` | add | set at saga start (`now + HOLD_TTL`) |
 | `reservation_id` | `TEXT` → `UUID` | |
+| `booking_id UUID UNIQUE` | was a plain index | one saga per booking; M5 `GetByBookingID` reads it. NULLs don't collide |
 | `payment_id UUID` | done (was `payment_intent_id TEXT`) | the orchestrator knows our payment ID, not Stripe's |
 | `version` | keep | every write is `UPDATE … WHERE version = <the version read>`, then `version + 1`; 0 rows changed = another writer was first |
-| `failure_reason TEXT` | add | NULL while `IN_PROGRESS`; then `ROOM_REJECTED`, `PHASE_A_ERROR`, `DEADLINE` or `CAPTURE_FAILED`. The `reason` of `ReleaseRoom` / `ExpireBooking` is read from it |
+| `failure_reason saga_failure_reason` | add (enum) | NULL on the main line (`IN_PROGRESS`, `COMPLETED`); then `ROOM_REJECTED`, `PHASE_A_ERROR`, `DEADLINE` or `CAPTURE_FAILED`. The `reason` of `ReleaseRoom` / `ExpireBooking` is read from it |
 
 ```sql
+-- a reason exactly when the saga left the main line
+CONSTRAINT check_failure_reason CHECK ((failure_reason IS NULL) = (status IN ('IN_PROGRESS', 'COMPLETED')))
+
+-- deadline worker: the steps whose hold can still expire (from CONFIRMING_ROOM on, the user has paid)
 CREATE INDEX idx_saga_deadline ON saga_instances (deadline_at)
-    WHERE "status" = 'IN_PROGRESS';
+    WHERE status = 'IN_PROGRESS'
+      AND current_step IN ('RESERVING_ROOM', 'CREATING_BOOKING', 'AWAITING_PAYMENT');
 ```
+
+- `GetOverdue` (M4a) repeats the index's `WHERE` with literals. With `$n` there, a generic plan can't prove the index predicate and may scan the table.
+- The three ids and `failure_reason` are NULL until set. The repository reads them as `""` (`COALESCE(col::text, '')`) and writes `NULLIF($n, '')`, so the core never sees NULL.
+- Dropped: `pgcrypto` (`gen_random_uuid()` is built in since Postgres 13), and the `(status, updated_at)` and `(type, status)` indexes (no query uses them).
 
 `context` JSONB: user snapshot, room snapshot, dates, guests, nightly rates, total, currency. It holds everything needed to build the next call.
 

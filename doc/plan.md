@@ -51,6 +51,13 @@ Done
   expires_at -> "expires_at: missing" (not the proto nil-Timestamp text), core errors name the field by its flat wire name
   ("number_of_guests: must be > 0", "nightly_rates[1].date: ..."). Docs synced (CLAUDE.md, contracts, flows, services,
   hexagonal-structure, Postman). M2 done
+- M3 step 1 (2026-11-16): orchestrator wiring: logger v1.1.0 + replace contracts/platform; config Clients (room +
+  booking addr, GRPC_TIMEOUT) + Saga{HoldTTL}, no GRPC_PORT (no gRPC server); durations via time.ParseDuration,
+  Load fails on an empty address or a duration <= 0; orchestrator DB + pg-orchestrator MCP
+- M3 step 2 (2026-11-16): create_saga_instances.sql + drop_all.sql, applied to the orchestrator DB and tested in a
+  rolled-back tx (every constraint, the version guard, the trigger, COALESCE / NULLIF, EXPLAIN of GetOverdue). Beyond
+  the plan: failure_reason is an enum with check_failure_reason, idx_saga_deadline also filters GetOverdue's 3 steps,
+  no DEFAULT on status / context, saga_type = CREATE_BOOKING only, booking_id UUID UNIQUE, type / status unquoted
 
 UC1 build order (main line of each flow first, decided 2026-11-11; done-when per milestone: uc1 README.md section 6)
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
@@ -66,7 +73,7 @@ UC1 build order (main line of each flow first, decided 2026-11-11; done-when per
   then good-to-have.md
 - Rule for M3-M6: an edge case met on the way gets one line under M7 (Notes), not code
 
-Next step: M3 step 1 (wiring)
+Next step: M3 step 3 (core model)
 Open decision (review round 2, 2026-11-12; decide before M5): starting payment extends the hold to the Stripe session's
   end (StartPayment's Save sets deadline_at = the session's expires_at + 1 min; CreateCheckoutSessionResponse gets
   expires_at). Today a user who opens the page at minute 10 and pays at minute 16 sees Stripe's success page and then an
@@ -75,37 +82,10 @@ Open decision (review round 2, 2026-11-12; decide before M5): starting payment e
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
 
 M3: Orchestrator phase A (POST /bookings -> ReserveRoom -> CreateBooking -> 201)
-orchestrator-service is a skeleton: empty main.go, comment-only files, go.mod with gin + logger v1.0.0. No outbox, Kafka
-or worker yet. Same shape as M1 / M2, plus two gRPC clients. The rules behind the choices: Why M3
+orchestrator-service has its config and saga_instances (steps 1-2, see Done); main.go is empty and the other files are
+comments only. No outbox, Kafka or worker yet. Same shape as M1 / M2, plus two gRPC clients. The rules behind the
+choices: Why M3
 
-1. Wiring
-    + go.mod: logger v1.1.0 + replace booking/contracts, like M2 step 1. The require comes with step 8 (tidy removes a
-      require nothing imports): go mod edit "-require=booking/contracts@v0.0.0", then go mod tidy. booking/platform
-      joins in M4a with the outbox. pgx/v5, grpc and google/uuid arrive by go mod tidy with their first import
-    + config/config.go (durations: time.ParseDuration; an empty address or a duration <= 0 is an error, so Load fails
-      at start, not at the first request)
-      type Clients struct {      // gRPC clients of the participants
-          RoomAddr    string        // ROOM_GRPC_ADDR, e.g. localhost:9180
-          BookingAddr string        // BOOKING_GRPC_ADDR
-          Timeout     time.Duration // GRPC_TIMEOUT, 3s: each call gets its own context.WithTimeout
-      }
-      type Saga struct { HoldTTL time.Duration } // HOLD_TTL, 15m
-      Config gets Clients + Saga next to Server, DB, Kafka (Kafka stays, unused until M4a). .env.example + your .env:
-      the addresses are room's and booking's GRPC_PORT. M4a adds DEADLINE_POLL, M5 PAYMENT_GRPC_ADDR + _TIMEOUT
-    + DB: create the orchestrator database + role where room and user live (DB_* in your .env). Later: a pg-orchestrator
-      MCP entry like pg-room, so I can check saga rows myself
-2. Migration (the CREATE file changes, so the DB is rebuilt; no ALTER)
-    + create_saga_instances.sql
-        new CREATE TYPE saga_step AS ENUM (the 8 steps of state-machines.md); current_step saga_step NOT NULL
-        add user_id UUID NOT NULL, deadline_at TIMESTAMPTZ NOT NULL, failure_reason TEXT (NULL = on the main line)
-        reservation_id TEXT -> UUID; keep version, context, booking_id, payment_id, type, the set_updated_at trigger
-        indexes: idx_saga_deadline ON (deadline_at) WHERE status = 'IN_PROGRESS' (data-model.md) replaces
-          idx_saga_instances_status_updated; drop idx_saga_instances_type_status (no query); idx_saga_instances_booking_id
-          becomes UNIQUE (one saga per booking; M5 GetByBookingID reads it)
-        drop CREATE EXTENSION pgcrypto: gen_random_uuid() is built in since Postgres 13
-    + db/migration/drop_all.sql (new), IF EXISTS everywhere: saga_message_log (FK to saga_instances), saga_instances,
-      function set_updated_at, types saga_status, saga_step, saga_type, direction, message_type. Then apply
-      create_saga_instances.sql only: saga_message_log is not v1 and its file goes in M4a
 3. Core model (internal/saga)
     + saga.go: one field per line with a db tag = column name, like booking (RowToAddrOfStructByName)
       type Saga struct {
@@ -139,7 +119,8 @@ or worker yet. Same shape as M1 / M2, plus two gRPC clients. The rules behind th
       type NightlyRate struct { Date string; Price int64 }     // date YYYY-MM-DD, price minor units
       Type (TypeCreateBooking), Status (IN_PROGRESS, COMPENSATING, COMPLETED, FAILED), Step (the 8 steps):
         type X string + constants + IsValid(), like booking; FailureReason: ROOM_REJECTED, DEADLINE, PHASE_A_ERROR,
-        CAPTURE_FAILED (M3 uses only the first)
+        CAPTURE_FAILED (M3 uses only the first). Each has the same values as its enum in create_saga_instances.sql
+        (saga_type, saga_status, saga_step, saga_failure_reason)
       // newSaga builds the row StartBooking inserts: CREATE_BOOKING, IN_PROGRESS, RESERVING_ROOM, the user's id,
       // context from req, deadline_at = now + holdTTL. now is a parameter so the test can fix it
       func newSaga(req StartRequest, now time.Time, holdTTL time.Duration) *Saga
@@ -226,17 +207,22 @@ or worker yet. Same shape as M1 / M2, plus two gRPC clients. The rules behind th
 7. Postgres adapter (adapter/postgres/saga_repository.go)
       func NewSagaRepository(pool *pgxpool.Pool) *SagaRepository
       var _ saga.Repository = (*SagaRepository)(nil)
-    + one column list for every RETURNING / SELECT: COALESCE(reservation_id::text, '') AS reservation_id (also
-      booking_id, payment_id, failure_reason), "type" and "status" quoted, like the CREATE file. Writes use
-      NULLIF($n, '')::uuid. context: pgx encodes and scans the struct as JSON
+    + one column list for every RETURNING / SELECT: COALESCE(reservation_id::text, '') AS reservation_id, the same for
+      booking_id, payment_id and failure_reason. The ::text matters for the enum: COALESCE(failure_reason, '') reads ''
+      as an enum value and fails. Writes use NULLIF($n, '')::uuid, and NULLIF($n, '')::saga_failure_reason for the
+      reason ($n is inferred as text, so pgx sends the Go string). context: pgx encodes and scans the struct as JSON.
+      All of it was checked against the real table in step 2
     + Create: INSERT (type, status, current_step, user_id, context, deadline_at) RETURNING the columns; CollectOneRow +
       RowToAddrOfStructByName
     + Save: UPDATE ... SET status, current_step, reservation_id, booking_id, payment_id, context, failure_reason,
       version = version + 1 WHERE saga_id = $1 AND version = $2 RETURNING the columns. pgx.ErrNoRows -> ErrStale.
-      type, user_id and deadline_at are written once by Create (the open decision may add deadline_at in M5)
+      type, user_id and deadline_at are written once by Create (the open decision may add deadline_at in M5);
+      updated_at by the trigger
       len(commands) > 0 -> return an error ("outbox not built until M4a"): a command must never vanish silently.
       No tx yet: one statement. M4a wraps UPDATE + outbox.Insert in one tx
 8. gRPC clients (adapter/grpcclient; the package implies the client, so Room / Booking)
+    + first: go mod edit "-require=booking/contracts@v0.0.0", then go mod tidy (tidy removes a require nothing imports,
+      so it waits for this first import; step 1 added the replace)
       type Room struct { client roomv1.RoomServiceClient; timeout time.Duration }
       func NewRoom(conn *grpc.ClientConn, timeout time.Duration) *Room
       var _ saga.RoomClient = (*Room)(nil)
@@ -302,7 +288,7 @@ or worker yet. Same shape as M1 / M2, plus two gRPC clients. The rules behind th
     + logs: "HTTP request completed" in the orchestrator, "gRPC request completed" with the saga_id in room and booking
     + go test ./... passes (transitions, service)
     + Docs (same pass): CLAUDE.md orchestrator row, go test line, Commands (the orchestrator needs room + booking
-      running); data-model.md (saga_step enum, the index changes); contracts.md (error body {"error": "ROOM_NOT_FOUND"});
+      running); contracts.md (error body {"error": "ROOM_NOT_FOUND"});
       hexagonal-structure.md orchestrator tree (errors.go; worker and kafka are M4a); Postman (orchestrator_url + create
       booking with the X-User-* headers)
 
@@ -312,8 +298,15 @@ Why M3 (proposed 2026-11-15)
   third MarshalJSON
 - "" for an id not known yet, not *string: the core only compares with "", and the NULL mapping is COALESCE / NULLIF in
   one adapter file. room's RoomReleased keeps *string: there the JSON message must carry null
-- saga_step is a Postgres ENUM, like every status column (CLAUDE.md): with TEXT a typo in a step would be stored and
-  the saga would never match a row of the table again
+- saga_step and saga_failure_reason are Postgres ENUMs, like every status column (CLAUDE.md): with TEXT a typo would be
+  stored (a step that never matches a row of the table again, a reason sent on in ReleaseRoom)
+- check_failure_reason (2026-11-16): failure_reason IS NULL exactly while status is IN_PROGRESS or COMPLETED. One line
+  of SQL stops a transition bug at the write, not in a later ReleaseRoom; UC2 may revisit it for its own saga type
+- idx_saga_deadline also filters the 3 pre-payment steps (2026-11-16): the same WHERE as GetOverdue, so the index holds
+  only the sagas the worker scans. GetOverdue writes that WHERE with literals: with $n, a generic plan (pgx caches
+  prepared statements) can't prove the index predicate and may scan the table (EXPLAIN on the real table, step 2)
+- No DEFAULT on status and context (2026-11-16): Create always sets them, so a forgotten one is an error, like the
+  price snapshot of reservations. saga_type is CREATE_BOOKING only until UC2 / UC3 are designed (ALTER TYPE ADD VALUE)
 - The port and the transition table grow with their callers: M3 = Create + Save and the 3 phase A rows. The other way,
   the whole table now: pure and cheap to test, but inputs without callers and nothing to run them
 - context.WithoutCancel in the handler: a client that disconnects after ReserveRoom would cancel CreateBooking and the
@@ -439,8 +432,8 @@ Notes for later milestones
       consumer and worker all go through transition. M7 adds RoomUnknown and BookingFailed (the two phase A error rows);
       until then the HTTP handler doesn't call transition for those two results
     + outside transition, on purpose: owner and now < deadline_at (StartPayment, before the gRPC call; its step check is
-      the PaymentStarted input); deadline_at < now
-      and status IN_PROGRESS (GetOverdue's SQL); copying an input's data (reservation, booking_id, payment_id) to the saga
+      the PaymentStarted input); deadline_at < now, status IN_PROGRESS and the 3 pre-payment steps (GetOverdue's SQL);
+      copying an input's data (reservation, booking_id, payment_id) to the saga
     + type Command string: only which message. Its data (ids, reason) is read from the saga when the outbox row is written
     + test: the doc's table row by row + a double loop: every other (step, input) pair gives ok = false + each finished
       status once: every input gives ok = false
@@ -455,7 +448,8 @@ Notes for later milestones
           caller continues with the returned saga (phase A saves twice). ErrStale: another writer saved first, nothing
           was written. M3 passes no commands; the outbox insert joins in M4a
         GetOverdue(ctx context.Context, now time.Time, limit int) ([]*Saga, error): IN_PROGRESS sagas in RESERVING_ROOM /
-          CREATING_BOOKING / AWAITING_PAYMENT with deadline_at < now (M4a)
+          CREATING_BOOKING / AWAITING_PAYMENT with deadline_at < now (M4a). The WHERE repeats idx_saga_deadline's
+          predicate with literals; only now and limit are $n (Why M3)
     + ErrStale: consumer -> return it, the loop calls the handler again from the read; deadline worker -> skip (the next
       poll reads again); StartBooking -> 503 (the worker released the saga during the request); StartPayment -> read the
       saga once more: still AWAITING_PAYMENT with the same payment_id -> 200, else 409 BOOKING_NOT_PAYABLE. StartPayment
@@ -476,7 +470,8 @@ Notes for later milestones
       per service can both produce and consume
     + migrations: create_saga_message_log.sql goes away; create_outbox_table.sql with the data-model.md DDL in
       orchestrator + room (M4a), booking (M4b), payment (M5): 4 copies in the end. Add DROP TABLE IF EXISTS outbox to
-      room's and booking's drop_all.sql
+      the orchestrator's, room's and booking's drop_all.sql (the orchestrator's also loses its saga_message_log,
+      direction and message_type lines)
 - M4a: platform/kafka (franz-go)
     + type Handler func(ctx context.Context, rec *kgo.Record) error: nil = done (processed, duplicate or ignored), an
       error = call me again with the same record
