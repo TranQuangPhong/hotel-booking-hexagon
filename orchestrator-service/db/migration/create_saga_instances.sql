@@ -25,12 +25,12 @@ CREATE TABLE saga_instances (
     type           saga_type NOT NULL,
     status         saga_status NOT NULL,
     current_step   saga_step NOT NULL,
-    user_id        UUID NOT NULL,                      -- owner check on POST .../payment
-    -- NULL until the step that creates them succeeds; the repository maps NULL <-> "" (COALESCE / NULLIF)
-    reservation_id UUID,
-    booking_id     UUID UNIQUE,                        -- one saga per booking (M5 GetByBookingID); NULLs never collide
-    payment_id     UUID,
-    context        JSONB NOT NULL,                     -- everything the next call needs: user, room, dates, rates, total
+    -- NULL until CreateBooking succeeds; the repository maps NULL <-> "" (COALESCE / NULLIF).
+    -- A column because POST .../payment looks the saga up by it (M5 GetByBookingID); NULLs never collide
+    booking_id     UUID UNIQUE,
+    -- everything else: user, room, dates, rates, total, reservation_id (and payment_id in M5). Nothing looks a saga up
+    -- by them (each participant row carries saga_id); the owner check on POST .../payment reads context.user.id
+    context        JSONB NOT NULL,
     failure_reason saga_failure_reason,                -- NULL while on the main line
     deadline_at    TIMESTAMPTZ NOT NULL,               -- now + HOLD_TTL at start, sent as the hold's expires_at
     version        INT NOT NULL DEFAULT 1,             -- every write: UPDATE ... WHERE version = <as read>, then + 1

@@ -17,10 +17,6 @@ func (h *Handler) Router() *gin.Engine {
 	v1 := r.Group("/orchestrator/api/v1")
 	{
 		v1.POST("/bookings", h.CreateBooking)
-		// v1.POST("/bookings/:id/modify", h.ModifyBooking)
-		// v1.POST("/bookings/:id/cancel", h.CancelBooking)
-		v1.POST("/bookings/:id/payment", h.StartPaymentTxn)
-		// v1.POST("/bookings/:id/refund", h.Refund)
 	}
 
 	return r

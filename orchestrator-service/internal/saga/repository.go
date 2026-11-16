@@ -1,5 +1,5 @@
 package saga
 
-// Driven port for saga persistence: Create, GetForUpdate, Save(saga, commands).
-// Save writes the new saga state and its outgoing commands (saga_message_log,
-// the outbox) in one transaction. Implemented by adapter/postgres.
+// Driven port for saga persistence: Create, Save(saga). Save is a conditional
+// update on version (ErrStale when another writer saved first). Implemented by
+// adapter/postgres.

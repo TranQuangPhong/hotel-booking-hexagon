@@ -14,7 +14,6 @@ type Config struct {
 	Server  Server // REST
 	Clients Clients
 	DB      DB
-	Kafka   Kafka
 	Saga    Saga
 }
 
@@ -34,10 +33,6 @@ type DB struct {
 	User     string
 	Password string
 	Name     string
-}
-
-type Kafka struct {
-	Brokers []string
 }
 
 type Saga struct {
@@ -72,11 +67,6 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("invalid DB_PORT: %w", err)
 	}
 
-	brokers := strings.Split(os.Getenv("KAFKA_BROKERS"), ",")
-	for i := range brokers {
-		brokers[i] = strings.TrimSpace(brokers[i])
-	}
-
 	holdTTL, err := positiveDuration("HOLD_TTL")
 	if err != nil {
 		return Config{}, err
@@ -97,9 +87,6 @@ func Load() (Config, error) {
 			User:     os.Getenv("DB_USER"),
 			Password: os.Getenv("DB_PASSWORD"),
 			Name:     os.Getenv("DB_NAME"),
-		},
-		Kafka: Kafka{
-			Brokers: brokers,
 		},
 		Saga: Saga{
 			HoldTTL: holdTTL,

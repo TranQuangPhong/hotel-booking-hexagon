@@ -9,5 +9,3 @@ func New() *Handler {
 }
 
 func (h *Handler) CreateBooking(c *gin.Context) {}
-
-func (h *Handler) StartPaymentTxn(c *gin.Context) {}
