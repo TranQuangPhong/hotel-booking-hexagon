@@ -94,18 +94,22 @@ main.go is empty and the remaining files are comments only. No outbox, Kafka or 
 plus two gRPC clients. The rules behind the choices: Why M3
 
 4. transition (transitions.go): the phase A rows only; each milestone adds its inputs, rows and test rows (Why M3)
-      type Input string    // InputRoomReserved, InputRoomRejected, InputBookingCreated
-      type Outcome struct { Status Status; Step Step; FailureReason FailureReason } // M4a adds Commands []Command
-      // transition is state-machines.md's table: no I/O. ok = false: in doesn't apply here (duplicate, late, lost a
-      // race); the caller logs and ignores it. Outcome.FailureReason "" = keep the saga's (never cleared)
-      func transition(status Status, step Step, in Input) (out Outcome, ok bool)
+      type Input string    // InputRoomReserved, InputRoomRejected, InputBookingCreated; never stored, so no SQL ENUM
+      type outcome struct { status Status; step Step; failureReason FailureReason } // "" = keep; M4a adds commands
+      type row struct { status Status; step Step; in Input } // the key of one line of the table
+      // transition is state-machines.md's table: no I/O, one case per row. ok = false: in doesn't apply in this state
+      // (duplicate, late, lost a race). StartBooking returns an error (a bug); M4a's consumer logs and acks
+      func transition(status Status, step Step, in Input) (out outcome, ok bool)
+          one flat switch (row{status, step, in}), keyed outcome literals (Why M3):
           IN_PROGRESS / RESERVING_ROOM   + RoomReserved   -> IN_PROGRESS / CREATING_BOOKING
           IN_PROGRESS / RESERVING_ROOM   + RoomRejected   -> FAILED / RESERVING_ROOM, ROOM_REJECTED (the step is kept)
           IN_PROGRESS / CREATING_BOOKING + BookingCreated -> IN_PROGRESS / AWAITING_PAYMENT
           COMPLETED or FAILED: every input -> ok = false; anything else -> ok = false
-      // next returns a copy of s with out applied (status, step, failure_reason if set); s is not modified
-      func (s *Saga) next(out Outcome) *Saga
-    + transitions_test.go: the 3 rows, then a double loop: every other (status, step, input) gives ok = false
+      // next returns a copy of s with out applied (status, step, failure_reason if set); s is not modified. Shallow:
+      // Context.NightlyRates is shared, so a caller assigns a new slice and never writes into it
+      func (s *Saga) next(out outcome) *Saga
+    + transitions_test.go: the 3 rows, then a double loop: every other (status, step, input) gives ok = false; next:
+      a copy (s unchanged), an outcome without a reason keeps the saga's
 5. Ports
     + repository.go. The port grows with its
       callers: GetByID + GetOverdue in M4a, GetByBookingID in M5 (signatures: Notes, saga core)
@@ -275,7 +279,7 @@ Why M3 (proposed 2026-11-15)
 - No DEFAULT on status and context (2026-11-16): Create always sets them, so a forgotten one is an error, like the
   price snapshot of reservations. saga_type is CREATE_BOOKING only until UC2 / UC3 are designed (ALTER TYPE ADD VALUE)
 - The port and the transition table grow with their callers: M3 = Create + Save(ctx, s) and the 3 phase A rows; M4a
-  adds Command, Outcome.Commands and Save's commands parameter with the outbox, M5 the /payment route and PaymentClient.
+  adds Command, outcome.commands and Save's commands parameter with the outbox, M5 the /payment route and PaymentClient.
   The other way, the whole table now: pure and cheap to test, but inputs without callers and nothing to run them
 - context.WithoutCancel in the handler: a client that disconnects after ReserveRoom would cancel CreateBooking and the
   Saves, and the saga would stop halfway for no reason. Values survive (trace_id); each call keeps its own timeout, so
@@ -287,6 +291,10 @@ Why M3 (proposed 2026-11-15)
 - Saga enums without IsValid() (2026-11-17): no value comes from outside, and the Postgres ENUM rejects a wrong one at
   the write. CLAUDE.md now asks for IsValid only on outside input (room, user). Names are <Type><Value>
   (StatusInProgress): four enums share one package, and ALL_CAPS would make InputRoomRejected clash with ROOM_REJECTED
+- transition is one flat switch on row{status, step, in} (2026-11-17): one case = one line of the table, so a row
+  valid in two statuses (M7's late PaymentAuthorized) is two cases, not an inner status check. Keyed outcome literals:
+  M4a's commands field then only touches the rows that send one. outcome and its fields are unexported: only the core
+  reads them
 
 Why M2 (accepted 2026-11-04)
 - One Booking struct: Detail only existed to join the old nightly_rates table. With JSONB there is nothing to join
@@ -391,9 +399,10 @@ Why phase numbers (decided 2026-11-03)
 Notes for later milestones
 - Every handler from M3 on: read without a lock -> the core decides -> one conditional write (Why design review)
 - Saga core (internal/saga), every milestone; M3 builds the phase A part (M3 steps 3-6)
-    + transition(status Status, step Step, in Input) (out Outcome, ok bool): the table of state-machines.md, no I/O
-      type Outcome struct { Status Status; Step Step; FailureReason FailureReason; Commands []Command }
-      ok = false: in doesn't apply here (duplicate, late, lost a race); the caller logs and ignores it
+    + transition(status Status, step Step, in Input) (out outcome, ok bool): the table of state-machines.md, no I/O,
+      one flat switch on row{status, step, in}
+      type outcome struct { status Status; step Step; failureReason FailureReason; commands []Command }
+      ok = false: in doesn't apply here (duplicate, late, lost a race); a consumer logs and acks
     + a row that ends the saga changes Status and keeps Step (BookingExpired at EXPIRING_BOOKING -> FAILED, step still
       EXPIRING_BOOKING): COMPLETED and FAILED are never steps. With status COMPLETED or FAILED every input gives
       ok = false (M7 adds one exception: PaymentAuthorized)

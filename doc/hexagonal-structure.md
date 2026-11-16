@@ -96,7 +96,7 @@ orchestrator-service/
 ├── internal/
 │   ├── saga/                         ===== CORE =====
 │   │   ├── saga.go                   # Saga entity, Step + Status enums, context, User (filled by the handler from X-User-* headers)
-│   │   ├── transitions.go            # UC1: the transition table as a pure function: transition(status, step, input) -> Outcome
+│   │   ├── transitions.go            # UC1: the transition table as a pure function: transition(status, step, input) -> outcome
 │   │   ├── service.go                # UC1: StartBooking, StartPayment, OnEvent, ExpireOverdue
 │   │   ├── repository.go             # UC1 port: saga.Repository (Create, GetByID, GetByBookingID, Save(saga, commands), GetOverdue)
 │   │   └── participants.go           # UC1 ports: RoomClient, BookingClient, PaymentClient (sync calls)
