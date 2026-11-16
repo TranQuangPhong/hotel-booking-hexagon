@@ -112,7 +112,7 @@ Rules:
 - **Money is stored in minor units as `int64`** (cents), with a separate `currency CHAR(3)`.
 - Names don't repeat their package: `user.Service`, `user.Repository`, `user.NewService`, `handler.Handler` + `handler.New`, `config.DB`. The package's main entity is the exception (`room.Room`, `config.Config`). Core port/service methods drop the entity too: `GetAll`, `GetByID`, `Create`, `UpdateStatus`, `GetByUserID`, `GetInventories` (plural for slices). gRPC RPC names (`CreateBooking`) and HTTP handler methods (`h.GetUsers`) keep it, because their package doesn't imply the entity. Core files are `repository.go` / `service.go`; adapter files keep the entity prefix (`postgres/room_repository.go`).
 - One name per field everywhere (REST, gRPC, Kafka, DB), `snake_case` in JSON. Flat structures prefix the owner (`user_phone_number`, `check_in_date`); nested objects drop it (`user.phone_number`, not `user.phone` or `user.user_phone_number`).
-- Status enums are Go `type X string` constants with `IsValid()`, mirrored by Postgres `ENUM` types.
+- Status enums are Go `type X string` constants named `<Type><Value>` (`StatusPending`, `StepReservingRoom`), mirrored by Postgres `ENUM` types. `IsValid()` only where a value comes from outside (REST / admin input in room and user); the saga enums have none.
 - Errors are wrapped with context: `fmt.Errorf("failed to ...: %w", err)`. Log the error value, not its string: `"error", err` / `slog.Any("error", err)`.
 - Config comes from env: `SERVER_PORT`, `GRPC_PORT` (services with a gRPC server), `DB_HOST/PORT/USER/PASSWORD/NAME`, `KAFKA_BROKERS` (comma-separated). The orchestrator adds `ROOM_GRPC_ADDR`, `BOOKING_GRPC_ADDR`, `PAYMENT_GRPC_ADDR`, `GRPC_TIMEOUT`, `PAYMENT_GRPC_TIMEOUT`, `HOLD_TTL`, `DEADLINE_POLL` (durations like `15m`, read with `time.ParseDuration`). `.env.example` is only a template, so identical values across services (like the port) are intentional. The real `.env` is gitignored, local only, and I set it up myself for each service.
 - Kafka: `franz-go` (`kgo`). Consumers use the shared loop in `platform/kafka`: a handler returns nil when the message is done and an error to be called again with the same record; the offset is committed only after nil.
@@ -127,7 +127,7 @@ Run from inside a service directory, since each one is a separate module:
 go run ./cmd            # start service (needs .env or env vars)
 go build ./...
 go vet ./...
-go test ./...           # unit tests so far: room-service internal/room, booking-service internal/booking
+go test ./...           # unit tests so far: room-service internal/room, booking-service internal/booking, orchestrator-service internal/saga
 go mod tidy
 ```
 Infra: `infra/postgresql/docker-compose.yml` currently defines only `postgres-booking` (host port 5440). `infra/kafka` and `infra/mongodb` are empty placeholders. Migrations in `db/migration/` are applied by hand.

@@ -61,6 +61,10 @@ Done
 - M3 review (2026-11-16): user_id, reservation_id, payment_id columns dropped (ids live in context; Why M3), DB rebuilt.
   Removed before their callers: StartPaymentTxn + /payment route, commented UC2 / UC3 routes, KAFKA_BROKERS config,
   placeholder files grpcclient/payment.go, kafka/, worker/ (the target tree stays in hexagonal-structure.md)
+- M3 step 3 (2026-11-17): saga.go (Saga with db tags, Context with snake_case json tags = the stored format, omitempty
+  on the user / room fields and on what ReserveRoom fills; enums named <Type><Value>, values = the SQL ENUMs, no
+  IsValid), newSaga, errors.go. saga_test.go: newSaga + Context JSON as an exact string (Go decodes keys
+  case-insensitively, so a round trip alone misses a missing tag)
 
 UC1 build order (main line of each flow first, decided 2026-11-11; done-when per milestone: uc1 README.md section 6)
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
@@ -76,7 +80,7 @@ UC1 build order (main line of each flow first, decided 2026-11-11; done-when per
   then good-to-have.md
 - Rule for M3-M6: an edge case met on the way gets one line under M7 (Notes), not code
 
-Next step: M3 step 3 (core model)
+Next step: M3 step 4 (transition)
 Open decision (review round 2, 2026-11-12; decide before M5): starting payment extends the hold to the Stripe session's
   end (StartPayment's Save sets deadline_at = the session's expires_at + 1 min; CreateCheckoutSessionResponse gets
   expires_at). Today a user who opens the page at minute 10 and pays at minute 16 sees Stripe's success page and then an
@@ -85,52 +89,10 @@ Open decision (review round 2, 2026-11-12; decide before M5): starting payment e
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
 
 M3: Orchestrator phase A (POST /bookings -> ReserveRoom -> CreateBooking -> 201)
-orchestrator-service has its config and saga_instances (steps 1-2, see Done); main.go is empty and the other files are
-comments only. No outbox, Kafka or worker yet. Same shape as M1 / M2, plus two gRPC clients. The rules behind the
-choices: Why M3
+orchestrator-service has its config, saga_instances and core model (steps 1-3, see Done; M5 adds Context.PaymentID);
+main.go is empty and the remaining files are comments only. No outbox, Kafka or worker yet. Same shape as M1 / M2,
+plus two gRPC clients. The rules behind the choices: Why M3
 
-3. Core model (internal/saga)
-    + saga.go: one field per line with a db tag = column name, like booking (RowToAddrOfStructByName)
-      type Saga struct {
-          ID            string        // saga_id
-          Type          Type          // CREATE_BOOKING
-          Status        Status
-          Step          Step          // current_step
-          BookingID     string        // "" until CreateBooking succeeds
-          Context       Context
-          FailureReason FailureReason // "" while on the main line
-          DeadlineAt    time.Time     // = ReserveRoom's and CreateBooking's expires_at, the 201's expires_at
-          Version       int
-          CreatedAt, UpdatedAt time.Time
-      }
-      // Context is the context JSONB: everything the next call needs. snake_case json tags on every field = the
-      // stored format
-      type Context struct {
-          User                      User          `json:"user"`
-          Room                      Room          `json:"room"` // ID from the request; Number, Type from ReserveRoom
-          CheckInDate, CheckOutDate string        // YYYY-MM-DD, as sent: room svc checks them (Why M3)
-          NumberOfGuests            int
-          ReservationID             string        // from here on: set from ReserveRoom's response, omitempty
-          TotalAmount               int64
-          Currency                  string
-          NightlyRates              []NightlyRate
-      }   // M5 adds PaymentID (from CreateCheckoutSession)
-      type User struct { ID, Name, Email, PhoneNumber string } // json: id, name, email, phone_number (may be empty)
-      type Room struct { ID, Number, Type string }              // json: id, number, type (omitempty until RoomReserved)
-      type NightlyRate struct { Date string; Price int64 }     // date YYYY-MM-DD, price minor units
-      Type (TypeCreateBooking), Status (IN_PROGRESS, COMPENSATING, COMPLETED, FAILED), Step (the 8 steps):
-        type X string + constants + IsValid(), like booking; FailureReason: ROOM_REJECTED, DEADLINE, PHASE_A_ERROR,
-        CAPTURE_FAILED (M3 uses only the first). Each has the same values as its enum in create_saga_instances.sql
-        (saga_type, saga_status, saga_step, saga_failure_reason)
-      // newSaga builds the row StartBooking inserts: CREATE_BOOKING, IN_PROGRESS, RESERVING_ROOM,
-      // context from req, deadline_at = now + holdTTL. now is a parameter so the test can fix it
-      func newSaga(req StartRequest, now time.Time, holdTTL time.Duration) *Saga
-    + errors.go
-      ErrInvalidInput    = errors.New("invalid input")    // 400: a bad X-User-Id, ReserveRoom INVALID_ARGUMENT
-      ErrRoomNotFound    = errors.New("ROOM_NOT_FOUND")   // 404: ReserveRoom NOT_FOUND
-      ErrRoomUnavailable = errors.New("ROOM_UNAVAILABLE") // 409: ReserveRoom FAILED_PRECONDITION
-      ErrStale           = errors.New("saga changed since it was read") // Save: the version moved
-      ErrNotFound comes in M4a with GetByID
 4. transition (transitions.go): the phase A rows only; each milestone adds its inputs, rows and test rows (Why M3)
       type Input string    // InputRoomReserved, InputRoomRejected, InputBookingCreated
       type Outcome struct { Status Status; Step Step; FailureReason FailureReason } // M4a adds Commands []Command
@@ -322,6 +284,9 @@ Why M3 (proposed 2026-11-15)
   reservation (RoomReleased with a nil reservation_id)
 - No idempotency on POST /bookings in v1: a retry after a 503 starts a second saga, and a double click gets 409 from the
   exclusion constraint (G2, Idempotency-Key)
+- Saga enums without IsValid() (2026-11-17): no value comes from outside, and the Postgres ENUM rejects a wrong one at
+  the write. CLAUDE.md now asks for IsValid only on outside input (room, user). Names are <Type><Value>
+  (StatusInProgress): four enums share one package, and ALL_CAPS would make InputRoomRejected clash with ROOM_REJECTED
 
 Why M2 (accepted 2026-11-04)
 - One Booking struct: Detail only existed to join the old nightly_rates table. With JSONB there is nothing to join
