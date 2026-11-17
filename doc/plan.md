@@ -65,6 +65,10 @@ Done
   on the user / room fields and on what ReserveRoom fills; enums named <Type><Value>, values = the SQL ENUMs, no
   IsValid), newSaga, errors.go. saga_test.go: newSaga + Context JSON as an exact string (Go decodes keys
   case-insensitively, so a round trip alone misses a missing tag)
+- M3 step 4 (2026-11-18): transitions.go (Input, outcome, row; transition = the 3 phase A rows in one flat switch; next =
+  a copy with out applied). transitions_test.go: the rows as wantRows map[row]outcome, compared whole (DeepEqual: M4a
+  adds commands); every other (status, step, input) -> ok = false, and the all* lists must reach every row; next: s
+  unchanged, every other field copied, sets / keeps the reason. Each check was seen failing on a broken copy
 
 UC1 build order (main line of each flow first, decided 2026-11-11; done-when per milestone: uc1 README.md section 6)
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
@@ -80,7 +84,7 @@ UC1 build order (main line of each flow first, decided 2026-11-11; done-when per
   then good-to-have.md
 - Rule for M3-M6: an edge case met on the way gets one line under M7 (Notes), not code
 
-Next step: M3 step 4 (transition)
+Next step: M3 step 5 (ports)
 Open decision (review round 2, 2026-11-12; decide before M5): starting payment extends the hold to the Stripe session's
   end (StartPayment's Save sets deadline_at = the session's expires_at + 1 min; CreateCheckoutSessionResponse gets
   expires_at). Today a user who opens the page at minute 10 and pays at minute 16 sees Stripe's success page and then an
@@ -89,27 +93,11 @@ Open decision (review round 2, 2026-11-12; decide before M5): starting payment e
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
 
 M3: Orchestrator phase A (POST /bookings -> ReserveRoom -> CreateBooking -> 201)
-orchestrator-service has its config, saga_instances and core model (steps 1-3, see Done; M5 adds Context.PaymentID);
+orchestrator-service has its config, saga_instances, core model and transition table (steps 1-4, see Done; M5 adds
+Context.PaymentID);
 main.go is empty and the remaining files are comments only. No outbox, Kafka or worker yet. Same shape as M1 / M2,
 plus two gRPC clients. The rules behind the choices: Why M3
 
-4. transition (transitions.go): the phase A rows only; each milestone adds its inputs, rows and test rows (Why M3)
-      type Input string    // InputRoomReserved, InputRoomRejected, InputBookingCreated; never stored, so no SQL ENUM
-      type outcome struct { status Status; step Step; failureReason FailureReason } // "" = keep; M4a adds commands
-      type row struct { status Status; step Step; in Input } // the key of one line of the table
-      // transition is state-machines.md's table: no I/O, one case per row. ok = false: in doesn't apply in this state
-      // (duplicate, late, lost a race). StartBooking returns an error (a bug); M4a's consumer logs and acks
-      func transition(status Status, step Step, in Input) (out outcome, ok bool)
-          one flat switch (row{status, step, in}), keyed outcome literals (Why M3):
-          IN_PROGRESS / RESERVING_ROOM   + RoomReserved   -> IN_PROGRESS / CREATING_BOOKING
-          IN_PROGRESS / RESERVING_ROOM   + RoomRejected   -> FAILED / RESERVING_ROOM, ROOM_REJECTED (the step is kept)
-          IN_PROGRESS / CREATING_BOOKING + BookingCreated -> IN_PROGRESS / AWAITING_PAYMENT
-          COMPLETED or FAILED: every input -> ok = false; anything else -> ok = false
-      // next returns a copy of s with out applied (status, step, failure_reason if set); s is not modified. Shallow:
-      // Context.NightlyRates is shared, so a caller assigns a new slice and never writes into it
-      func (s *Saga) next(out outcome) *Saga
-    + transitions_test.go: the 3 rows, then a double loop: every other (status, step, input) gives ok = false; next:
-      a copy (s unchanged), an outcome without a reason keeps the saga's
 5. Ports
     + repository.go. The port grows with its
       callers: GetByID + GetOverdue in M4a, GetByBookingID in M5 (signatures: Notes, saga core)
@@ -415,8 +403,9 @@ Notes for later milestones
       the PaymentStarted input); deadline_at < now, status IN_PROGRESS and the 3 pre-payment steps (GetOverdue's SQL);
       copying an input's data (reservation, booking_id, payment_id) to the saga
     + type Command string: only which message. Its data (ids, reason) is read from the saga when the outbox row is written
-    + test: the doc's table row by row + a double loop: every other (step, input) pair gives ok = false + each finished
-      status once: every input gives ok = false
+    + test (transitions_test.go): the doc's table as wantRows map[row]outcome, compared whole + one loop over every
+      status, step and input: every other combination gives ok = false (the finished statuses too). Each milestone
+      adds its rows to wantRows and its new values to the all* lists
     + port saga.Repository
         Create(ctx context.Context, s *Saga) (*Saga, error): returns the stored row (saga_id, version 1, created_at come
           from the DB); s is not modified
