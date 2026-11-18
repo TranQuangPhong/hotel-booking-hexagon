@@ -69,6 +69,13 @@ Done
   a copy with out applied). transitions_test.go: the rows as wantRows map[row]outcome, compared whole (DeepEqual: M4a
   adds commands); every other (status, step, input) -> ok = false, and the all* lists must reach every row; next: s
   unchanged, every other field copied, sets / keeps the reason. Each check was seen failing on a broken copy
+- M3 steps 5-6 (2026-11-19): ports (Repository = Create + Save only, the rest with their callers; RoomClient,
+  BookingClient, Reservation) and StartBooking + advance(ctx, sg *Saga, in, fill) (fill may be nil). Review fixes: fill
+  writes its own parameter (the closures wrote the old saga, so the reservation and booking_id never reached Save),
+  room number / type copied, only a definite rejection (isRoomRejection in errors.go) saves FAILED / ROOM_REJECTED and
+  is returned unwrapped (it is the 400 body); an unknown outcome saves nothing; a failed rejection Save is logged with
+  slog.ErrorContext (the logger adds trace_id from ctx); other errors wrapped with %w. service_test.go: the 4 planned
+  cases + a Save error after RoomReserved + advance with ok = false; each check seen failing on a broken copy
 
 UC1 build order (main line of each flow first, decided 2026-11-11; done-when per milestone: uc1 README.md section 6)
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
@@ -84,7 +91,7 @@ UC1 build order (main line of each flow first, decided 2026-11-11; done-when per
   then good-to-have.md
 - Rule for M3-M6: an edge case met on the way gets one line under M7 (Notes), not code
 
-Next step: M3 step 5 (ports)
+Next step: M3 step 7 (Postgres adapter)
 Open decision (review round 2, 2026-11-12; decide before M5): starting payment extends the hold to the Stripe session's
   end (StartPayment's Save sets deadline_at = the session's expires_at + 1 min; CreateCheckoutSessionResponse gets
   expires_at). Today a user who opens the page at minute 10 and pays at minute 16 sees Stripe's success page and then an
@@ -93,71 +100,10 @@ Open decision (review round 2, 2026-11-12; decide before M5): starting payment e
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
 
 M3: Orchestrator phase A (POST /bookings -> ReserveRoom -> CreateBooking -> 201)
-orchestrator-service has its config, saga_instances, core model and transition table (steps 1-4, see Done; M5 adds
-Context.PaymentID);
-main.go is empty and the remaining files are comments only. No outbox, Kafka or worker yet. Same shape as M1 / M2,
-plus two gRPC clients. The rules behind the choices: Why M3
+orchestrator-service has its config, saga_instances, core model, transition table, ports and StartBooking (steps
+1-6, see Done; M5 adds Context.PaymentID); main.go is empty and the adapters are stubs. No outbox, Kafka or worker yet.
+Same shape as M1 / M2, plus two gRPC clients. The rules behind the choices: Why M3
 
-5. Ports
-    + repository.go. The port grows with its
-      callers: GetByID + GetOverdue in M4a, GetByBookingID in M5 (signatures: Notes, saga core)
-      // Create inserts s and returns the stored row (saga_id, version 1, created_at come from the DB); s is not modified
-      Create(ctx context.Context, s *Saga) (*Saga, error)
-      // Save writes s only if the stored version is still s.Version. Returns the stored row (version + 1); s is not
-      // modified. ErrStale: another writer saved first, nothing written. M4a adds commands []Command (outbox rows, same tx)
-      Save(ctx context.Context, s *Saga) (*Saga, error)
-    + participants.go (PaymentClient comes in M5)
-      type Reservation struct {
-          ID, RoomNumber, RoomType, Currency string
-          TotalAmount                        int64
-          NightlyRates                       []NightlyRate
-      }
-      type RoomClient interface {
-          // Reserve calls ReserveRoom with s.ID, the room and dates from s.Context, s.DeadlineAt as expires_at.
-          // Definite rejection: an error wrapping ErrRoomNotFound, ErrInvalidInput or ErrRoomUnavailable (nothing is
-          // held). Any other error: outcome unknown, a hold may exist
-          Reserve(ctx context.Context, s *Saga) (*Reservation, error)
-      }
-      type BookingClient interface {
-          // Create calls CreateBooking from s after RoomReserved (context incl. reservation_id, DeadlineAt as expires_at).
-          // No domain errors: in M3 every error means the same (503, the hold stays)
-          Create(ctx context.Context, s *Saga) (bookingID, status string, err error)
-      }
-6. Service (service.go)
-      type Service struct { repository Repository; room RoomClient; booking BookingClient; holdTTL time.Duration }
-      func NewService(repo Repository, room RoomClient, booking BookingClient, holdTTL time.Duration) *Service
-      // StartRequest: POST /bookings, filled by the handler
-      type StartRequest struct {
-          User                      User
-          RoomID                    string
-          CheckInDate, CheckOutDate string // YYYY-MM-DD
-          NumberOfGuests            int
-      }
-      // Started: the data of the 201
-      type Started struct {
-          BookingID, BookingStatus string    // as CreateBooking returned them (PENDING for a new saga)
-          TotalAmount              int64
-          Currency                 string
-          ExpiresAt                time.Time // the saga's deadline_at
-      }
-      func (s *Service) StartBooking(ctx context.Context, req StartRequest) (*Started, error)
-          1. Create(newSaga(req, time.Now().UTC(), s.holdTTL)): an error -> return it (503), nothing is held yet
-          2. room.Reserve
-               rejection -> transition(RoomRejected) -> Save (FAILED, ROOM_REJECTED), return the rejection. A Save error
-                 is logged and the rejection is still returned: it is the client's true answer
-               any other error -> return it (503), save nothing: the saga stays at RESERVING_ROOM for the M4a worker
-          3. transition(RoomReserved) -> next + context: reservation_id, room number / type, total, currency, rates -> Save
-          4. booking.Create: an error -> return it (503), save nothing: the saga stays at CREATING_BOOKING
-          5. transition(BookingCreated) -> next + BookingID -> Save -> return Started
-          ok = false in 3 or 5 is a bug (this request made the saga): return an error. Any Save error, ErrStale too
-          (no other writer before M4a), -> 503. The saved saga is the returned one (Save doesn't modify its argument)
-          A small helper is worth it, since OnEvent reuses it in M4a:
-          func (s *Service) advance(ctx context.Context, sg *Saga, in Input, fill func(*Saga)) (*Saga, error)
-              transition -> sg.next -> fill (copies the input's data) -> Save
-    + service_test.go with three small fakes (Repository, RoomClient, BookingClient: structs with a func field or a
-      canned answer). Cases: happy path (two Saves, AWAITING_PAYMENT, Started from the reservation + booking); room not
-      found (one Save: FAILED / RESERVING_ROOM / ROOM_REJECTED, errors.Is ErrRoomNotFound); room timeout (no Save, not a
-      rejection); booking error (one Save at CREATING_BOOKING, then an error)
 7. Postgres adapter (adapter/postgres/saga_repository.go)
       func NewSagaRepository(pool *pgxpool.Pool) *SagaRepository
       var _ saga.Repository = (*SagaRepository)(nil)

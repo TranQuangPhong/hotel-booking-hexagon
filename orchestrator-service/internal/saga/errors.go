@@ -8,3 +8,9 @@ var (
 	ErrRoomUnavailable = errors.New("ROOM_UNAVAILABLE")               // 409: ReserveRoom FAILED_PRECONDITION
 	ErrStale           = errors.New("saga changed since it was read") // Save: the version moved
 )
+
+// isRoomRejection: ReserveRoom answered with a definite no, so nothing is held. Any other Reserve error is an unknown
+// outcome
+func isRoomRejection(err error) bool {
+	return errors.Is(err, ErrRoomNotFound) || errors.Is(err, ErrInvalidInput) || errors.Is(err, ErrRoomUnavailable)
+}
