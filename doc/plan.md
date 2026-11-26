@@ -76,6 +76,11 @@ Done
   is returned unwrapped (it is the 400 body); an unknown outcome saves nothing; a failed rejection Save is logged with
   slog.ErrorContext (the logger adds trace_id from ctx); other errors wrapped with %w. service_test.go: the 4 planned
   cases + a Save error after RoomReserved + advance with ok = false; each check seen failing on a broken copy
+- M3 step 7 (2026-11-27): adapter/postgres SagaRepository. Create = INSERT of the 5 columns; Save = UPDATE ... WHERE
+  saga_id AND version, 0 rows -> ErrStale (no lock needed: a second UPDATE waits for the first, then Postgres re-checks
+  the WHERE on the new row). One sagaColumns list for every RETURNING / SELECT: COALESCE(x::text, '') on read,
+  NULLIF($n, '')::type on write. One error message per method (server errors arrive in CollectOneRow, not Query).
+  pgx direct in go.mod. Builds; not run against the DB yet (step 12)
 
 UC1 build order (main line of each flow first, decided 2026-11-11; done-when per milestone: uc1 README.md section 6)
 - M1: Room ReserveRoom gRPC (done 2026-10-26)
@@ -91,7 +96,7 @@ UC1 build order (main line of each flow first, decided 2026-11-11; done-when per
   then good-to-have.md
 - Rule for M3-M6: an edge case met on the way gets one line under M7 (Notes), not code
 
-Next step: M3 step 7 (Postgres adapter)
+Next step: M3 step 8 (gRPC clients)
 Open decision (review round 2, 2026-11-12; decide before M5): starting payment extends the hold to the Stripe session's
   end (StartPayment's Save sets deadline_at = the session's expires_at + 1 min; CreateCheckoutSessionResponse gets
   expires_at). Today a user who opens the page at minute 10 and pays at minute 16 sees Stripe's success page and then an
@@ -100,25 +105,10 @@ Open decision (review round 2, 2026-11-12; decide before M5): starting payment e
 Work split: I write the main gRPC logic by hand; Claude handles the subtle details + refactoring when I ask
 
 M3: Orchestrator phase A (POST /bookings -> ReserveRoom -> CreateBooking -> 201)
-orchestrator-service has its config, saga_instances, core model, transition table, ports and StartBooking (steps
-1-6, see Done; M5 adds Context.PaymentID); main.go is empty and the adapters are stubs. No outbox, Kafka or worker yet.
-Same shape as M1 / M2, plus two gRPC clients. The rules behind the choices: Why M3
+orchestrator-service has its config, saga_instances, core model, transition table, ports, StartBooking and the
+Postgres adapter (steps 1-7, see Done; M5 adds Context.PaymentID); main.go is empty and the other adapters are stubs.
+No outbox, Kafka or worker yet. Same shape as M1 / M2, plus two gRPC clients. The rules behind the choices: Why M3
 
-7. Postgres adapter (adapter/postgres/saga_repository.go)
-      func NewSagaRepository(pool *pgxpool.Pool) *SagaRepository
-      var _ saga.Repository = (*SagaRepository)(nil)
-    + one column list for every RETURNING / SELECT: COALESCE(booking_id::text, '') AS booking_id, the same for
-      failure_reason. The ::text matters for the enum: COALESCE(failure_reason, '') reads '' as an enum value and
-      fails. Writes use NULLIF($n, '')::uuid, and NULLIF($n, '')::saga_failure_reason for the reason ($n is inferred
-      as text, so pgx sends the Go string). context: pgx encodes and scans the struct as JSON.
-      All of it was checked against the real table in step 2
-    + Create: INSERT (type, status, current_step, context, deadline_at) RETURNING the columns; CollectOneRow +
-      RowToAddrOfStructByName
-    + Save: UPDATE ... SET status, current_step, booking_id, context, failure_reason, version = version + 1
-      WHERE saga_id = $1 AND version = $2 RETURNING the columns. pgx.ErrNoRows -> ErrStale.
-      type and deadline_at are written once by Create (the open decision may add deadline_at in M5);
-      updated_at by the trigger
-      No tx yet: one statement. M4a adds the commands parameter and wraps UPDATE + outbox.Insert in one tx
 8. gRPC clients (adapter/grpcclient; the package implies the client, so Room / Booking)
     + first: go mod edit "-require=booking/contracts@v0.0.0", then go mod tidy (tidy removes a require nothing imports,
       so it waits for this first import; step 1 added the replace)
